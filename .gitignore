@@ -1,0 +1,143 @@
+# =========================
+
+# Python
+
+# =========================
+
+**pycache**/
+*.py[cod]
+*$py.class
+*.so
+
+# Python build / distribution
+
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# =========================
+
+# Virtual Environment
+
+# =========================
+
+.venv/
+venv/
+env/
+ENV/
+
+# =========================
+
+# Environment Variables
+
+# =========================
+
+.env
+.env.*
+!.env.example
+
+# =========================
+
+# Testing / Coverage
+
+# =========================
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# =========================
+
+# Type Checking
+
+# =========================
+
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# =========================
+
+# Ruff / Linting
+
+# =========================
+
+.ruff_cache/
+
+# =========================
+
+# Jupyter
+
+# =========================
+
+.ipynb_checkpoints/
+
+# =========================
+
+# IDE / Editors
+
+# =========================
+
+.vscode/
+.idea/
+
+# =========================
+
+# OS Files
+
+# =========================
+
+.DS_Store
+Thumbs.db
+
+# =========================
+
+# Logs
+
+# =========================
+
+*.log
+logs/
+
+# =========================
+
+# Local Database
+
+# =========================
+
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+
+# FastAPI / Uvicorn
+
+# =========================
+
+.uvicorn/
+
+# =========================
+
+# UV
+
+# =========================
+
+.uv/
+
+# =========================
+
+# Local secrets / certificates
+
+# =========================
+
+*.pem
+*.key
+*.crt
+secrets/

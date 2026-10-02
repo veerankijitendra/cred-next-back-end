@@ -1,4 +1,4 @@
-from sqlalchemy import Enum, String
+from sqlalchemy import Boolean, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -17,14 +17,16 @@ class User(BaseModelMixin, Base):
         phone_number: str,
         password_hash: str | None = None,
         role: UserRoleEnum = UserRoleEnum.USER,
-        refresh_token: str | None = None,
+        refresh_token_hash: str | None = None,
+        is_verified: bool = False,
     ):
         self.name = name
         self.email = email
         self.phone_number = phone_number
         self.password_hash = password_hash
         self.role = role
-        self.refresh_token = refresh_token
+        self.refresh_token_hash = refresh_token_hash
+        self.is_verified = is_verified
 
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     email: Mapped[str] = mapped_column(
@@ -44,6 +46,8 @@ class User(BaseModelMixin, Base):
         ),
         default=UserRoleEnum.USER,
     )
-    refresh_token: Mapped[str | None] = mapped_column(
+    refresh_token_hash: Mapped[str | None] = mapped_column(
         String(300), default=None, nullable=True
     )
+
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -1,0 +1,54 @@
+# This workflow installs Python dependencies with uv, runs linting/tests, and triggers Render deployments.
+name: Python application
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # 1. Initialize uv package manager (massively speeds up installations)
+    - name: Setup uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    # 2. Use uv to lock Python to version 3.10
+    - name: Set up Python 3.10
+      run: uv python install 3.10
+
+    # 3. Install required dev tools and your project dependencies
+    - name: Install dependencies
+      run: |
+        uv pip install flake8 pytest
+        if [ -f requirements.txt ]; then uv pip install -r requirements.txt; fi
+
+    # 4. Static analysis checking for critical syntax issues
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        uv run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        uv run flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    # 5. Run your test suite using pytest via uv
+    - name: Test with pytest
+      run: |
+        uv run pytest
+
+    # 6. Safely trigger deployment ONLY on pushes to main if all steps pass
+    - name: Trigger Render Deploy Hook
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
+      run: |
+        curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"

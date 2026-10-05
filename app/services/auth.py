@@ -1,10 +1,11 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import OTPChannel
 from app.core.exceptions import ConflictError, ForbiddenError, UnauthorizedError
+from app.core.reference_id import generate_reference_id
 from app.core.security import (
     create_access_token,
     hash_password,
@@ -17,6 +18,8 @@ from app.repositories.user import UserRepository
 from app.schemas.auth import RegisterRequest, RegisterResponse
 from app.services.notification import NotificationService
 from app.services.otp import OTPService
+
+MAX_TRANSACTION_RETRIES = 3
 
 
 class AuthService:
@@ -37,9 +40,13 @@ class AuthService:
         if existing_phone_number:
             raise ConflictError("Phone number is already registered.")
 
+        user_id = uuid4()
+
         password_hash = hash_password(password=data.password)
 
         user = User(
+            id=user_id,
+            reference_id=generate_reference_id(user_id=user_id),
             name=data.name,
             email=data.email,
             phone_number=data.phone_number,
@@ -74,6 +81,7 @@ class AuthService:
 
         return RegisterResponse(
             user_id=user.id,
+            reference_id=user.reference_id,
             verification_required=True,
             verification_channel=OTPChannel.PHONE,
         )

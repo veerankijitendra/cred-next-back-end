@@ -83,6 +83,7 @@ class RegisterResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     user_id: UUID
+    reference_id: str
     verification_required: bool
     verification_channel: OTPChannel
 

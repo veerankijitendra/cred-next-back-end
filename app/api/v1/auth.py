@@ -26,7 +26,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post(
-    "/register", response_model=RegisterResponse, status_code=status.HTTP_202_ACCEPTED
+    "/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED
 )
 async def register(
     data: RegisterRequest, session: AsyncSession = Depends(get_db)

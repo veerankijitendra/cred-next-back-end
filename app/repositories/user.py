@@ -41,3 +41,10 @@ class UserRepository:
         await self.session.flush()
 
         return user
+
+    async def get_by_reference_id(self, *, reference_id: str) -> User | None:
+        result = await self.session.execute(
+            select(User).where(User.reference_id == reference_id)
+        )
+
+        return result.scalar_one_or_none()

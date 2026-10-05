@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy import Boolean, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,14 +14,18 @@ class User(BaseModelMixin, Base):
     def __init__(
         self,
         *,
+        id: UUID,
         name: str,
         email: str,
         phone_number: str,
+        reference_id: str,
         password_hash: str | None = None,
         role: UserRoleEnum = UserRoleEnum.USER,
         refresh_token_hash: str | None = None,
         is_verified: bool = False,
     ):
+        self.id = id
+        self.reference_id = reference_id
         self.name = name
         self.email = email
         self.phone_number = phone_number
@@ -51,3 +57,5 @@ class User(BaseModelMixin, Base):
     )
 
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    reference_id: Mapped[str] = mapped_column(String(45), unique=True, nullable=False)

@@ -28,7 +28,7 @@ async def get_current_user(
     payload = decode_token(token=token)
 
     if payload.get("type") != "access":
-        UnauthorizedError(message="Access token required.")
+        raise UnauthorizedError(message="Access token required.")
 
     user_id = payload.get("sub")
 

@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
@@ -24,6 +25,7 @@ MAX_TRANSACTION_RETRIES = 3
 
 class AuthService:
     def __init__(self, session: AsyncSession):
+        self.logger = logging.getLogger(__class__.__name__)
         self.session = session
         self.user_repository = UserRepository(session=session)
 
@@ -72,6 +74,13 @@ class AuthService:
         notification_service = NotificationService()
 
         otp = await otp_service.create_otp(user_id=user.id, channel=OTPChannel.PHONE)
+
+        self.logger.info(
+            "Your OTP:- %s and user-id:- %s, send via:- %s",
+            otp,
+            str(user.id),
+            OTPChannel.PHONE,
+        )
 
         await self.session.commit()
 

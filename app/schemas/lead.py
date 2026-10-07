@@ -161,3 +161,82 @@ class LeadStatusBoardResponse(BaseModel):
     current_status: LeadStatus
     status_board: list[LeadStatusItem]
     updated_at: datetime
+
+
+class LeadResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    lead_id: str
+    application_type: ApplicationType
+    loan_type: LoanType
+    full_name: str
+    contact_number: str
+    email: EmailStr
+    city: str
+    loan_amount: Decimal
+    monthly_income: Decimal
+    credit_score: int | None
+    status: LeadStatus
+    created_by_user_id: UUID
+    referred_by_user_id: UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DashboardSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    total_leads: int
+
+    lead_submitted: int
+    customer_evaluation: int
+    documents: int
+    bank_process: int
+    disbursed: int
+    rejected: int
+
+
+class ReferralResponse(BaseModel):
+    reference_id: str
+    referral_link: str
+
+
+class DashboardResponse(BaseModel):
+    summary: DashboardSummaryResponse
+    referral: ReferralResponse
+
+
+class LeadListItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    lead_id: str
+    application_type: ApplicationType
+    loan_type: LoanType
+    full_name: str
+    city: str
+    loan_amount: Decimal
+    status: LeadStatus
+    created_at: datetime
+
+
+class LeadListResponse(BaseModel):
+    items: list[LeadListItemResponse]
+
+    page: int
+    page_size: int
+
+    total: int
+    total_pages: int
+
+    has_next: bool
+    has_previous: bool
+
+
+class LeadListQuery(BaseModel):
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=10, ge=1, le=100)
+    search: str | None = Field(default=None, max_length=100)
+    status: LeadStatus | None = None
+    loan_type: LoanType | None = None
+    application_type: ApplicationType | None = None

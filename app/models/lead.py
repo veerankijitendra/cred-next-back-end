@@ -87,7 +87,7 @@ class Lead(Base, BaseModelMixin):
 
     credit_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    status: Mapped[str] = mapped_column(
+    status: Mapped[LeadStatus] = mapped_column(
         String(100),
         nullable=False,
         default=LeadStatus.LEAD_SUBMITTED,

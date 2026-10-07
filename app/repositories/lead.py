@@ -1,9 +1,9 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import LeadStatus
+from app.core.constants import ApplicationType, LeadStatus
 from app.models.lead import Lead
 
 
@@ -40,6 +40,52 @@ class LeadRepository:
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def get_user_leads_paginated(
+        self,
+        *,
+        user_id: UUID,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        status: LeadStatus | None = None,
+        application_type: ApplicationType | None = None,
+    ) -> tuple[list[Lead], int]:
+        filters = [Lead.created_by_user_id == user_id]
+
+        if search:
+            search_term = f"%{search.strip()}%"
+
+            filters.append(
+                or_(
+                    Lead.email.ilike(search_term),
+                    Lead.contact_number.ilike(search_term),
+                    Lead.full_name.ilike(search_term),
+                    Lead.city.ilike(search_term),
+                )
+            )
+
+        if status:
+            filters.append(Lead.status == status)
+
+        if application_type:
+            filters.append(Lead.application_type == application_type)
+
+        count_statement = select(func.count(Lead.id)).where(*filters)
+
+        count_result = await self.session.execute(count_statement)
+
+        total = count_result.scalar_one()
+
+        offset = (page - 1) * page_size
+
+        statement = select(Lead).where(*filters).offset(offset).limit(page_size)
+
+        result = await self.session.execute(statement)
+
+        leads = list(result.scalars().all())
+
+        return leads, total
 
     async def get_referral_leads(self, user_id: UUID) -> list[Lead]:
         query = (

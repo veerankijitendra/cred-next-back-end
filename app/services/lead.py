@@ -1,39 +1,45 @@
+import math
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import ApplicationType
+from app.core.constants import ApplicationType, LeadStatus
 from app.core.exceptions import ConflictError
 from app.core.lead_id import generate_lead_id
 from app.models.lead import Lead
+from app.models.lead_status_history import LeadStatusHistory
+from app.models.user import User
 from app.repositories.lead import LeadRepository
+from app.repositories.lead_status_history import LeadStatusHistoryRepository
 from app.repositories.user import UserRepository
-from app.schemas.lead import LeadRequest
+from app.schemas.lead import LeadListItemResponse, LeadListResponse, LeadRequest
 
 
 class LeadService:
     def __init__(
         self,
         session: AsyncSession,
-        LeadRepository: LeadRepository,
-        UserRepository: UserRepository,
+        lead_repository: LeadRepository,
+        user_repository: UserRepository,
+        lead_status_history_repository: LeadStatusHistoryRepository,
     ):
         self.session = session
-        self.lead_repository = LeadRepository
-        self.user_repository = UserRepository
+        self.lead_repository = lead_repository
+        self.user_repository = user_repository
+        self.lead_status_history_repository = lead_status_history_repository
 
-    async def create_lead(self, *, lead_request: LeadRequest):
+    async def create_lead(self, *, lead_request: LeadRequest, user: User):
         reference_id: UUID | None = None
         # ---------------------------------------------------------
         # 1. SELF APPLICATION
         # ---------------------------------------------------------
 
-        if lead_request.application_type == ApplicationType.SELF:
-            if lead_request.reference_id is not None:
-                raise ConflictError(
-                    "Reference ID is not allowed for self applications."
-                )
+        if (
+            lead_request.application_type == ApplicationType.SELF
+            and lead_request.reference_id is not None
+        ):
+            raise ConflictError("Reference ID is not allowed for self applications.")
 
         # ---------------------------------------------------------
         # 2. REFERRAL APPLICATION
@@ -87,3 +93,78 @@ class LeadService:
             await self.session.rollback()
 
             raise ConflictError("Unable to create lead because of a conflicting record")
+
+    async def get_user_leads(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        user_id: UUID,
+        search: str | None = None,
+        status: LeadStatus | None = None,
+        application_type: ApplicationType | None = None,
+    ) -> LeadListResponse:
+
+        leads, total = await self.lead_repository.get_user_leads_paginated(
+            user_id=user_id,
+            search=search,
+            status=status,
+            application_type=application_type,
+            page_size=page_size,
+            page=page,
+        )
+
+        total_pages = math.ceil(total / page_size) if total > 0 else 0
+
+        return LeadListResponse(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=total_pages,
+            has_next=page < total_pages,
+            has_previous=page > 1,
+            items=[LeadListItemResponse.model_validate(lead) for lead in leads],
+        )
+
+    async def update_lead_status(
+        self,
+        *,
+        lead: Lead,
+        new_status: LeadStatus,
+        changed_by_user: User,
+        reason: str | None = None,
+    ) -> Lead:
+
+        if lead.status == new_status:
+            raise ConflictError("Lead is already in this status")
+
+        old_status = lead.status
+
+        history: LeadStatusHistory = LeadStatusHistory(
+            new_status=new_status,
+            old_status=old_status,
+            lead_id=lead.id,
+            changed_by_user_id=changed_by_user.id,
+            reason=reason,
+        )
+
+        try:
+            # 1.Update the current status
+            lead.status = new_status
+
+            await self.lead_repository.update_status(lead=lead, status=new_status)
+
+            # 2. Create history record
+            await self.lead_status_history_repository.create(history=history)
+
+            # 3. Commit BOTH operations together
+
+            await self.session.commit()
+
+            await self.session.refresh(lead)
+
+            return lead
+        except Exception:
+            await self.session.rollback()
+
+            raise

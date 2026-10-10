@@ -6,7 +6,6 @@ from app.db.session import get_db
 from app.models.user import User
 from app.repositories.lead import LeadRepository
 from app.repositories.lead_status_history import LeadStatusHistoryRepository
-from app.repositories.user import UserRepository
 from app.schemas.lead import LeadRequest, LeadResponse
 from app.services.lead import LeadService
 
@@ -17,7 +16,6 @@ def get_lead_service(session: AsyncSession = Depends(get_db)) -> LeadService:
     return LeadService(
         session=session,
         lead_repository=LeadRepository(session=session),
-        user_repository=UserRepository(session=session),
         lead_status_history_repository=LeadStatusHistoryRepository(session=session),
     )
 
@@ -25,9 +23,9 @@ def get_lead_service(session: AsyncSession = Depends(get_db)) -> LeadService:
 @router.post("")
 async def create_lead(
     request: LeadRequest,
-    current_user_id: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     service: LeadService = Depends(get_lead_service),
 ) -> LeadResponse:
-    lead = await service.create_lead(lead_request=request, user=current_user_id)
+    lead = await service.create_lead(lead_request=request, user=current_user)
 
     return LeadResponse.model_validate(lead)

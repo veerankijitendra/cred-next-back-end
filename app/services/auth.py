@@ -1,33 +1,33 @@
-import logging
-from uuid import UUID, uuid4
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import OTPChannel
+from app.core.config import settings
 from app.core.exceptions import ConflictError, ForbiddenError, UnauthorizedError
 from app.core.reference_id import generate_reference_id
 from app.core.security import (
     create_access_token,
+    create_refresh_token,
     hash_password,
     hash_refresh_token,
     verify_password,
-    verify_refresh_token,
 )
 from app.models.user import User
+from app.repositories.refresh_session import RefreshSessionRepository
+from app.models.refresh_session import RefreshCredential, RefreshSession
 from app.repositories.user import UserRepository
 from app.schemas.auth import RegisterRequest, RegisterResponse
 from app.services.notification import NotificationService
 from app.services.otp import OTPService
 
-MAX_TRANSACTION_RETRIES = 3
-
-
 class AuthService:
     def __init__(self, session: AsyncSession):
-        self.logger = logging.getLogger(__class__.__name__)
         self.session = session
         self.user_repository = UserRepository(session=session)
+        self.refresh_repository = RefreshSessionRepository(session=session)
 
     async def register_user(self, *, data: RegisterRequest) -> RegisterResponse:
         existing_email = await self.user_repository.get_by_email(email=data.email)
@@ -75,13 +75,6 @@ class AuthService:
 
         otp = await otp_service.create_otp(user_id=user.id, channel=OTPChannel.PHONE)
 
-        self.logger.info(
-            "Your OTP:- %s and user-id:- %s, send via:- %s",
-            otp,
-            str(user.id),
-            OTPChannel.PHONE,
-        )
-
         await self.session.commit()
 
         await notification_service.send_otp(
@@ -112,78 +105,89 @@ class AuthService:
                 message="Please verify your account before logging in."
             )
 
-        access_token, refresh_token = self._get_access_refresh_token(
-            user_id=str(user.id), role=user.role
+        now = datetime.now(UTC)
+        auth_session = RefreshSession(
+            user_id=user.id,
+            expires_at=now + timedelta(days=settings.refresh_token_expire_days),
         )
-
-        await self._save_refresh_token(user=user, refresh_token=refresh_token)
-
-        return access_token, refresh_token
-
-    def _get_access_refresh_token(self, user_id: str, role: str) -> tuple[str, str]:
-        access_token = create_access_token(user_id=user_id, role=role)
-        refresh_token = create_access_token(user_id=user_id, role=role)
-
-        return access_token, refresh_token
-
-    async def _save_refresh_token(self, *, user: User, refresh_token: str):
-        refresh_token_hash = hash_refresh_token(refresh_token=refresh_token)
-
-        try:
-            await self.user_repository.update_refresh_token_hash(
-                user=user, refresh_token_hash=refresh_token_hash
+        await self.refresh_repository.create_session(auth_session=auth_session)
+        refresh_token = create_refresh_token()
+        await self.refresh_repository.create_credential(
+            credential=RefreshCredential(
+                session_id=auth_session.id,
+                token_hash=hash_refresh_token(refresh_token),
+                expires_at=auth_session.expires_at,
             )
-            await self.session.commit()
+        )
+        access_token = create_access_token(
+            user_id=str(user.id), role=str(user.role), session_id=auth_session.id
+        )
+        await self.session.commit()
 
+        return access_token, refresh_token
+
+    async def refresh_tokens(self, *, refresh_token: str) -> tuple[str, str]:
+        token_hash = hash_refresh_token(refresh_token)
+        credential = await self.refresh_repository.get_credential(token_hash=token_hash)
+        if credential is None:
+            raise UnauthorizedError(message="Invalid refresh session.")
+
+        auth_session = await self.refresh_repository.get_session(
+            session_id=credential.session_id, for_update=True
+        )
+        if auth_session is None:
+            raise UnauthorizedError(message="Invalid refresh session.")
+
+        # Re-read after taking the session lock so concurrent refreshes serialize.
+        credential = await self.refresh_repository.get_credential(token_hash=token_hash)
+        if credential is None:
+            raise UnauthorizedError(message="Invalid refresh session.")
+
+        now = datetime.now(UTC)
+        if credential.consumed_at is not None:
+            if auth_session.revoked_at is None:
+                auth_session.revoked_at = now
+                await self.session.commit()
+            raise UnauthorizedError(message="Refresh token reuse detected; session revoked.")
+        if auth_session.revoked_at is not None or auth_session.expires_at <= now or credential.expires_at <= now:
+            raise UnauthorizedError(message="Refresh session is expired or revoked.")
+
+        user = await self.user_repository.get_by_id(user_id=auth_session.user_id)
+        if user is None:
+            auth_session.revoked_at = now
+            await self.session.commit()
+            raise UnauthorizedError(message="Invalid refresh session.")
+
+        new_refresh_token = create_refresh_token()
+        credential.consumed_at = now
+        await self.refresh_repository.create_credential(
+            credential=RefreshCredential(
+                session_id=auth_session.id,
+                token_hash=hash_refresh_token(new_refresh_token),
+                expires_at=auth_session.expires_at,
+            )
+        )
+        access_token = create_access_token(
+            user_id=str(user.id), role=str(user.role), session_id=auth_session.id
+        )
+        try:
+            await self.session.commit()
         except Exception:
             await self.session.rollback()
             raise
-
-    def _get_user_uuid(self, *, user_id: str) -> UUID:
-        try:
-            user_uuid = UUID(user_id)
-        except ValueError as exc:
-            raise UnauthorizedError(message="Invalid user ID.") from exc
-
-        return user_uuid
-
-    async def refresh_tokens(self, user_id: str, refresh_token: str) -> tuple[str, str]:
-        user_uuid = self._get_user_uuid(user_id=user_id)
-
-        user = await self.user_repository.get_by_id(user_id=user_uuid)
-
-        if not user:
-            raise UnauthorizedError(message="Invalid refresh token.")
-
-        if not user.refresh_token_hash:
-            raise UnauthorizedError(message="Refresh token is revoked.")
-
-        if not verify_refresh_token(
-            refresh_token=refresh_token, refresh_token_hash=user.refresh_token_hash
-        ):
-            raise UnauthorizedError(message="Invalid refresh token.")
-
-        access_token, new_refresh_token = self._get_access_refresh_token(
-            user_id=str(user.id), role=user.role
-        )
-
-        await self._save_refresh_token(user=user, refresh_token=new_refresh_token)
-
         return access_token, new_refresh_token
 
-    async def logout_user(self, user_id: str):
-        user_uuid = self._get_user_uuid(user_id=user_id)
-
-        user = await self.user_repository.get_by_id(user_id=user_uuid)
-
-        if not user:
-            raise UnauthorizedError(message="User not found.")
-
-        user.refresh_token_hash = None
-
-        try:
+    async def logout_user(self, *, refresh_token: str | None) -> None:
+        if not refresh_token:
+            return
+        credential = await self.refresh_repository.get_credential(
+            token_hash=hash_refresh_token(refresh_token)
+        )
+        if credential is None:
+            return
+        auth_session = await self.refresh_repository.get_session(
+            session_id=credential.session_id, for_update=True
+        )
+        if auth_session is not None and auth_session.revoked_at is None:
+            auth_session.revoked_at = datetime.now(UTC)
             await self.session.commit()
-
-        except Exception:
-            await self.session.rollback()
-            raise

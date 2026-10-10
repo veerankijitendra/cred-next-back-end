@@ -1,16 +1,15 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user
 from app.core.constants import OTPChannel
-from app.core.exceptions import UnauthorizedError
-from app.core.security import decode_token
+from app.core.config import settings
+from app.core.exceptions import ForbiddenError, UnauthorizedError
 from app.db.session import get_db
 from app.models.user import User
 from app.repositories.user import UserRepository
 from app.schemas.auth import (
     LoginRequest,
-    RefreshTokenRequest,
     RegisterRequest,
     RegisterResponse,
     ResendOTPRequest,
@@ -23,6 +22,36 @@ from app.services.notification import NotificationService
 from app.services.otp import OTPService
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+def _require_trusted_origin(request: Request) -> None:
+    origin = request.headers.get("origin")
+    if origin is None or origin.rstrip("/") not in settings.trusted_origins:
+        raise ForbiddenError(message="A trusted Origin header is required.")
+
+
+def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    response.set_cookie(
+        key=settings.refresh_cookie_name,
+        value=refresh_token,
+        max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
+        httponly=True,
+        secure=settings.use_secure_refresh_cookie,
+        samesite=settings.refresh_cookie_samesite,
+        path="/api/v1/auth",
+        domain=settings.refresh_cookie_domain,
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=settings.refresh_cookie_name,
+        httponly=True,
+        secure=settings.use_secure_refresh_cookie,
+        samesite=settings.refresh_cookie_samesite,
+        path="/api/v1/auth",
+        domain=settings.refresh_cookie_domain,
+    )
 
 
 @router.post(
@@ -40,36 +69,38 @@ async def register(
 
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
 async def login(
-    data: LoginRequest, session: AsyncSession = Depends(get_db)
+    data: LoginRequest, request: Request, response: Response, session: AsyncSession = Depends(get_db)
 ) -> TokenResponse:
+    _require_trusted_origin(request)
     service = AuthService(session=session)
 
-    (access_token, refresh_token) = await service.login_user(
+    access_token, refresh_token = await service.login_user(
         email=data.email, password=data.password
     )
 
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    _set_refresh_cookie(response, refresh_token)
+    return TokenResponse(access_token=access_token)
 
 
 @router.post("/refresh", response_model=TokenResponse, status_code=status.HTTP_200_OK)
-async def refresh(data: RefreshTokenRequest, session: AsyncSession = Depends(get_db)):
-    payload = decode_token(data.refresh_token)
-
-    if payload.get("type") == "refresh":
-        raise UnauthorizedError(message="Invalid refresh token")
-
-    user_id = payload.get("sub")
-
-    if not user_id:
-        raise UnauthorizedError(message="Invalid refresh token")
-
+async def refresh(request: Request, response: Response, session: AsyncSession = Depends(get_db)):
+    _require_trusted_origin(request)
+    refresh_token = request.cookies.get(settings.refresh_cookie_name)
+    if not refresh_token:
+        raise UnauthorizedError(message="Refresh session is required.")
     service = AuthService(session=session)
+    access_token, new_refresh_token = await service.refresh_tokens(refresh_token=refresh_token)
+    _set_refresh_cookie(response, new_refresh_token)
+    return TokenResponse(access_token=access_token)
 
-    access_token, new_refresh_token = await service.refresh_tokens(
-        user_id=user_id, refresh_token=data.refresh_token
-    )
 
-    return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)
+@router.post("/logout", status_code=status.HTTP_200_OK)
+async def logout(request: Request, response: Response, session: AsyncSession = Depends(get_db)):
+    _require_trusted_origin(request)
+    refresh_token = request.cookies.get(settings.refresh_cookie_name)
+    await AuthService(session=session).logout_user(refresh_token=refresh_token)
+    _clear_refresh_cookie(response)
+    return {"success": True, "message": "Session logged out."}
 
 
 @router.get("/me", response_model=UserResponse)
@@ -123,10 +154,12 @@ async def resend_otp(data: ResendOTPRequest, session: AsyncSession = Depends(get
 
     destination = user.phone_number if data.channel == OTPChannel.PHONE else user.email
 
-    await notification_service.send_otp(
+    delivered = await notification_service.send_otp(
         destination=destination, otp=otp, channel=data.channel
     )
 
     await session.commit()
 
+    if not delivered:
+        return {"success": False, "message": "OTP delivery is not configured."}
     return {"success": True, "message": "OTP sent successfully"}

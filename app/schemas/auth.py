@@ -7,7 +7,6 @@ from pydantic import (
     EmailStr,
     Field,
     StringConstraints,
-    ValidationError,
     field_validator,
 )
 
@@ -49,22 +48,25 @@ class RegisterRequest(BaseModel):
         ),
     ]
 
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
     @field_validator("password")
     @classmethod
     def validate_password(cls, value: str) -> str:
         if not any(char.isupper() for char in value):
-            raise ValidationError("Password must contain an uppercase letter")
+            raise ValueError("Password must contain an uppercase letter")
 
         if not any(char.islower() for char in value):
-            raise ValidationError("Password must contain a lowercase letter")
+            raise ValueError("Password must contain a lowercase letter")
 
         if not any(char.isdigit() for char in value):
-            raise ValidationError("Password must contain a number")
+            raise ValueError("Password must contain a number")
 
         if not any(not char.isalnum() for char in value):
-            raise ValidationError(
-                "Password must contain at least one special character"
-            )
+            raise ValueError("Password must contain at least one special character")
 
         return value
 
@@ -98,17 +100,17 @@ class LoginRequest(BaseModel):
         max_length=PASSWORD_MAX_LENGTH,
     )
 
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
 
 class TokenResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
-
-
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
 
 
 class VerifyOTPRequest(BaseModel):

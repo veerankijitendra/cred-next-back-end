@@ -38,13 +38,15 @@ class OTPService:
 
     async def verify(self, user_id: UUID, channel: OTPChannel, otp: str) -> bool:
         verification = await self.repository.get_latest(
-            user_id=user_id, channel=channel
+            user_id=user_id, channel=channel, for_update=True
         )
 
         if not verification:
             raise UnauthorizedError(message="OTP is invalid or expired")
 
         if verification.expires_at < datetime.now(UTC):
+            await self.repository.mark_used(otp_verification=verification)
+            await self.session.commit()
             raise UnauthorizedError(message="OTP is invalid or expired")
 
         if verification.attempts >= settings.otp_max_attempts:
@@ -52,6 +54,7 @@ class OTPService:
 
         if not verify_otp(otp=otp, otp_hash=verification.otp_hash):
             await self.repository.increment_attempts(otp_verification=verification)
+            await self.session.commit()
 
             raise UnauthorizedError(message="Invalid OTP")
 
@@ -61,7 +64,7 @@ class OTPService:
 
     async def resend(self, user_id: UUID, channel: OTPChannel) -> str:
 
-        latest_otp = await self.repository.get_latest(user_id=user_id, channel=channel)
+        latest_otp = await self.repository.get_latest(user_id=user_id, channel=channel, for_update=True)
 
         now = datetime.now(UTC)
 

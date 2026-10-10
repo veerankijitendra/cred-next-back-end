@@ -1,3 +1,5 @@
+import asyncio
+import sys
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -7,7 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 from app.core.config import settings
 from app.db.base import Base
-from app.models import Lead, LeadStatusHistory, OTPVerification, User  # noqa: F401
+from app.models import Lead, LeadStatusHistory, OTPVerification, RefreshCredential, RefreshSession, User  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -44,7 +46,7 @@ def run_migrations_offline() -> None:
     """
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=settings.database_url,
+        url=settings.database_url.get_secret_value(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -66,7 +68,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     connectable = create_async_engine(
-        settings.database_url,
+        settings.database_url.get_secret_value(),
         poolclass=pool.NullPool,
     )
 
@@ -96,9 +98,13 @@ def run_migrations_online() -> None:
 
     #     with context.begin_transaction():
     #         context.run_migrations()
-    import asyncio
-
-    asyncio.run(run_async_migrations())
+    if sys.platform == "win32":
+        # psycopg's async implementation requires a SelectorEventLoop on Windows;
+        # asyncio.run() otherwise selects ProactorEventLoop by default.
+        with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+            runner.run(run_async_migrations())
+    else:
+        asyncio.run(run_async_migrations())
 
 
 if context.is_offline_mode():

@@ -12,9 +12,9 @@ class OTPRepository:
         self.session = session
 
     async def get_latest(
-        self, *, user_id: UUID, channel: OTPChannel
+        self, *, user_id: UUID, channel: OTPChannel, for_update: bool = False
     ) -> OTPVerification | None:
-        result = await self.session.execute(
+        statement = (
             select(OTPVerification)
             .where(
                 OTPVerification.user_id == user_id,
@@ -24,6 +24,9 @@ class OTPRepository:
             .order_by(OTPVerification.created_at.desc())
             .limit(1)
         )
+        if for_update:
+            statement = statement.with_for_update()
+        result = await self.session.execute(statement)
 
         return result.scalar_one_or_none()
 

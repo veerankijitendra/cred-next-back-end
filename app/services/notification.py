@@ -1,20 +1,27 @@
+import logging
+
 from app.core.constants import OTPChannel
+
+logger = logging.getLogger(__name__)
 
 
 class NotificationService:
     async def send_otp(
         self, *, channel: OTPChannel, destination: str, otp: str
-    ) -> None:
+    ) -> bool:
 
         if channel == OTPChannel.PHONE:
-            await self._send_phone_otp(phone_number=destination, otp=otp)
-            return
+            return await self._send_phone_otp(phone_number=destination, otp=otp)
 
         if channel == OTPChannel.EMAIL:
-            await self._send_email_otp(email=destination, otp=otp)
+            return await self._send_email_otp(email=destination, otp=otp)
 
-    async def _send_phone_otp(self, *, phone_number: str, otp: str) -> None:
-        print(f"[DEV] OTP for {phone_number}: {otp}")
+        return False
 
-    async def _send_email_otp(self, *, email: str, otp: str) -> None:
-        print(f"[DEV] OTP for {email}: {otp}")
+    async def _send_phone_otp(self, *, phone_number: str, otp: str) -> bool:
+        logger.warning("OTP delivery is not configured; no phone message was sent")
+        return False
+
+    async def _send_email_otp(self, *, email: str, otp: str) -> bool:
+        logger.warning("OTP delivery is not configured; no email message was sent")
+        return False

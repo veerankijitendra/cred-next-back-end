@@ -9,7 +9,6 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
-    ValidationError,
     field_validator,
 )
 
@@ -38,12 +37,10 @@ class LeadRequest(BaseModel):
         value = value.strip()
 
         if not value:
-            raise ValidationError("Full name cannot be empty.")
+            raise ValueError("Full name cannot be empty.")
 
         if not re.fullmatch(r"[A-Z]+(?: [A-Z]+)*", value):
-            raise ValidationError(
-                "Full name must contain uppercase alphabets and spaces only"
-            )
+            raise ValueError("Full name must contain uppercase alphabets and spaces only")
 
         return value
 

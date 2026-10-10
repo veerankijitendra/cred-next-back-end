@@ -19,7 +19,7 @@ class OTPVerification(Base, BaseModelMixin):
         channel: OTPChannel,
         otp_hash: str,
         expires_at: datetime,
-        attempts: int = 1,
+        attempts: int = 0,
         is_used: bool = False,
     ):
         self.user_id = user_id

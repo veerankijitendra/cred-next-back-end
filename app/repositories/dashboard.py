@@ -33,7 +33,7 @@ class DashboardRepository:
             func.count(Lead.id)
             .filter(Lead.status == LeadStatus.BANK_PROCESS)
             .label("bank_process"),
-        ).where(Lead.id == user_id)
+        ).where(Lead.created_by_user_id == user_id)
 
         result = await self.session.execute(statement)
 

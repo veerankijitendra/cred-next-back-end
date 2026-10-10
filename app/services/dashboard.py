@@ -19,17 +19,17 @@ class DashboardService:
 
     async def get_user_dashboard(self, *, current_user: User) -> DashboardResponse:
 
-        summery = await self.repository.get_user_summary(user_id=current_user.id)
+        summary = await self.repository.get_user_summary(user_id=current_user.id)
 
         return DashboardResponse(
             summary=DashboardSummaryResponse(
-                bank_process=summery.get("bank_process", 0),
-                customer_evaluation=summery.get("bank_process", 0),
-                disbursed=summery.get("bank_process", 0),
-                lead_submitted=summery.get("bank_process", 0),
-                documents=summery.get("bank_process", 0),
-                rejected=summery.get("bank_process", 0),
-                total_leads=summery.get("bank_process", 0),
+                bank_process=summary.get("bank_process", 0),
+                customer_evaluation=summary.get("customer_evaluation", 0),
+                disbursed=summary.get("disbursed", 0),
+                lead_submitted=summary.get("lead_submitted", 0),
+                documents=summary.get("documents", 0),
+                rejected=summary.get("rejected", 0),
+                total_leads=summary.get("total_leads", 0),
             ),
             referral=ReferralResponse(
                 reference_id=current_user.reference_id,

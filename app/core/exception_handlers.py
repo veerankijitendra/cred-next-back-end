@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
-    logger.warning("Application error: %s | path:%s", exc.message, request.url.path)
+    logger.warning("Application error code=%s | path=%s", exc.error_code, request.url.path)
 
     http_status = status.HTTP_500_INTERNAL_SERVER_ERROR
 
@@ -40,11 +40,11 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    logger.warning(
-        "Validation error | path=%s | errors=%s",
-        request.url.path,
-        exc.errors(),
-    )
+    sanitized_details = [
+        {"loc": error.get("loc", ()), "msg": error.get("msg", "Invalid value"), "type": error.get("type", "value_error")}
+        for error in exc.errors()
+    ]
+    logger.warning("Validation error | path=%s | fields=%s", request.url.path, [item["loc"] for item in sanitized_details])
 
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -52,7 +52,7 @@ async def validation_exception_handler(
             "success": False,
             "message": "Request validation failed",
             "error_code": "VALIDATION_ERROR",
-            "details": exc.errors(),
+            "details": sanitized_details,
         },
     )
 
@@ -61,10 +61,7 @@ async def sqlalchemy_exception_handler(
     request: Request,
     exc: SQLAlchemyError,
 ) -> JSONResponse:
-    logger.exception(
-        "Unexpected database error | path=%s",
-        request.url.path,
-    )
+    logger.error("Unexpected database error | path=%s | exception_type=%s", request.url.path, type(exc).__name__)
 
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -80,10 +77,7 @@ async def unhandled_exception_handler(
     request: Request,
     exc: Exception,
 ) -> JSONResponse:
-    logger.exception(
-        "Unhandled application error | path=%s",
-        request.url.path,
-    )
+    logger.error("Unhandled application error | path=%s | exception_type=%s", request.url.path, type(exc).__name__)
 
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

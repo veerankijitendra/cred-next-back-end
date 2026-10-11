@@ -96,6 +96,7 @@ class LeadService:
         )
 
         total_pages = math.ceil(total / page_size) if total > 0 else 0
+        
 
         return LeadListResponse(
             page=page,

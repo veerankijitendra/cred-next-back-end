@@ -6,7 +6,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.repositories.lead import LeadRepository
 from app.repositories.lead_status_history import LeadStatusHistoryRepository
-from app.schemas.lead import LeadRequest, LeadResponse
+from app.schemas.lead import LeadListQuery, LeadListResponse, LeadRequest, LeadResponse
 from app.services.lead import LeadService
 
 router = APIRouter(prefix="/lead", tags=["Leads"])
@@ -29,3 +29,19 @@ async def create_lead(
     lead = await service.create_lead(lead_request=request, user=current_user)
 
     return LeadResponse.model_validate(lead)
+
+
+@router.get("", response_model=LeadListResponse)
+async def get_leads(
+    query: LeadListQuery = Depends(),
+    current_user: User = Depends(get_current_user),
+    service: LeadService = Depends(get_lead_service),
+) -> LeadListResponse:
+    leads = await service.get_user_leads(
+        application_type=query.application_type,
+        user_id=current_user.id,
+        page=query.page,
+        page_size=query.page_size,
+    )
+
+    return leads

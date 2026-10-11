@@ -79,6 +79,7 @@ class UserResponse(BaseModel):
     email: str
     phone_number: str
     role: str
+    reference_id: str
 
 
 class RegisterResponse(BaseModel):

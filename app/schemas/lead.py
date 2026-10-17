@@ -199,11 +199,6 @@ class ReferralResponse(BaseModel):
     referral_link: str
 
 
-class DashboardResponse(BaseModel):
-    summary: DashboardSummaryResponse
-    referral: ReferralResponse
-
-
 class LeadListItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -237,3 +232,9 @@ class LeadListQuery(BaseModel):
     status: LeadStatus | None = None
     loan_type: LoanType | None = None
     application_type: ApplicationType | None = None
+
+
+class DashboardResponse(BaseModel):
+    summary: DashboardSummaryResponse
+    referral: ReferralResponse
+    leads: LeadListResponse

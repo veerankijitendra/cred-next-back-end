@@ -3,7 +3,7 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import ApplicationType, LeadStatus
+from app.core.constants import ApplicationType, LeadStatus, LoanType
 from app.models.lead import Lead
 
 
@@ -49,6 +49,7 @@ class LeadRepository:
         page_size: int,
         search: str | None = None,
         status: LeadStatus | None = None,
+        loan_type: LoanType | None = None,
         application_type: ApplicationType | None = None,
     ) -> tuple[list[Lead], int]:
         filters = [Lead.created_by_user_id == user_id]
@@ -68,6 +69,9 @@ class LeadRepository:
         if status:
             filters.append(Lead.status == status)
 
+        if loan_type:
+            filters.append(Lead.loan_type == loan_type)
+
         if application_type:
             filters.append(Lead.application_type == application_type)
 
@@ -79,7 +83,13 @@ class LeadRepository:
 
         offset = (page - 1) * page_size
 
-        statement = select(Lead).where(*filters).offset(offset).limit(page_size)
+        statement = (
+            select(Lead)
+            .where(*filters)
+            .order_by(Lead.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
 
         result = await self.session.execute(statement)
 

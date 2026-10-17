@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     cors_allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    frontend_base_url: str = "http://localhost:5173"
     refresh_cookie_name: str = "crednexa_refresh"
     refresh_cookie_secure: bool | None = None
     refresh_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
@@ -97,6 +98,22 @@ class Settings(BaseSettings):
             ):
                 raise ValueError("CORS_ALLOWED_ORIGINS must contain exact HTTP(S) origins without paths")
         return origins
+
+    @field_validator("frontend_base_url")
+    @classmethod
+    def validate_frontend_base_url(cls, value: str) -> str:
+        value = value.rstrip("/")
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("FRONTEND_BASE_URL must be an HTTP(S) URL without query or fragment")
+        return value
 
     @model_validator(mode="after")
     def validate_cookie_settings(self) -> "Settings":

@@ -26,9 +26,13 @@ Every protected request checks that the access JWT is valid and its associated r
 
 The frontend currently expects a refresh token in JSON and sends it in the refresh request body. It must set Axios `withCredentials: true`, call refresh with an empty body so the browser sends the HttpOnly cookie, use the returned access token, and call logout before clearing local auth state. It should attempt refresh during startup before treating an in-memory access token absence as logout. No frontend files were changed in this backend task.
 
+## User dashboard
+
+`GET /api/v1/dashboard` requires a bearer access token. It returns counts for all lead statuses, the authenticated user's referral ID and referral URL, and a paginated list of that user's leads. List query parameters are `page` (default 1), `page_size` (default 10, maximum 100), `status`, `loan_type`, `application_type`, and `search` (applicant name, email, contact number, or city). Filters affect the list only; summary counts include all of the user's leads. Set `FRONTEND_BASE_URL` to the frontend origin; referral URLs use `/register?ref=<reference_id>`.
+
 ## Authorization and business-rule scope
 
-Lead creation requires a valid authenticated user. The authenticated user is the creator and referrer; a client-supplied reference ID cannot attribute a lead to another account. Self/referral classification compares normalized contact numbers to the account phone. The backend has no borrower phone verification flow, so the submitted lead contact cannot be proven to be the borrower's verified phone. There are currently no registered lead list/detail/status routes, admin lead operations, payout calculations, or payout transfers; no commission or Self-Bonus payment is implemented or implied by lead creation.
+Lead creation requires a valid authenticated user. The authenticated user is the creator and referrer; a client-supplied reference ID cannot attribute a lead to another account. Self/referral classification compares normalized contact numbers to the account phone. The backend has no borrower phone verification flow, so the submitted lead contact cannot be proven to be the borrower's verified phone. There are currently no registered lead detail or status-update routes, admin lead operations, payout calculations, or payout transfers; no commission or Self-Bonus payment is implemented or implied by lead creation.
 
 ## Migration and verification
 

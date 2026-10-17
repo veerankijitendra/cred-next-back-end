@@ -153,13 +153,6 @@ class LeadStatusItem(BaseModel):
     current: bool
 
 
-class LeadStatusBoardResponse(BaseModel):
-    lead_id: str
-    current_status: LeadStatus
-    status_board: list[LeadStatusItem]
-    updated_at: datetime
-
-
 class LeadResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -178,6 +171,22 @@ class LeadResponse(BaseModel):
     created_by_user_id: UUID
     referred_by_user_id: UUID | None
     created_at: datetime
+    updated_at: datetime
+
+
+class LeadStatusHistoryItem(BaseModel):
+    old_status: LeadStatus | None
+    new_status: LeadStatus
+    reason: str | None
+    changed_at: datetime
+
+
+class LeadStatusBoardResponse(BaseModel):
+    lead: LeadResponse
+    current_status: LeadStatus
+    status_board: list[LeadStatusItem]
+    outcome: LeadStatus | None
+    history: list[LeadStatusHistoryItem]
     updated_at: datetime
 
 

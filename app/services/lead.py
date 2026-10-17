@@ -6,14 +6,30 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import ApplicationType, LeadStatus
-from app.core.exceptions import ConflictError, ForbiddenError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.core.lead_id import generate_lead_id
 from app.models.lead import Lead
 from app.models.lead_status_history import LeadStatusHistory
 from app.models.user import User
 from app.repositories.lead import LeadRepository
 from app.repositories.lead_status_history import LeadStatusHistoryRepository
-from app.schemas.lead import LeadListItemResponse, LeadListResponse, LeadRequest
+from app.schemas.lead import (
+    LeadListItemResponse,
+    LeadListResponse,
+    LeadRequest,
+    LeadResponse,
+    LeadStatusBoardResponse,
+    LeadStatusHistoryItem,
+    LeadStatusItem,
+)
+
+STATUS_STAGES = (
+    (LeadStatus.LEAD_SUBMITTED, "Lead Submitted"),
+    (LeadStatus.CUSTOMER_EVALUATION, "Customer Evaluation"),
+    (LeadStatus.DOCUMENTS, "Documents"),
+    (LeadStatus.BANK_PROCESS, "Bank Process"),
+    (LeadStatus.DISBURSED, "Disbursed"),
+)
 
 
 class LeadService:
@@ -64,6 +80,14 @@ class LeadService:
 
         try:
             await self.lead_repository.create(lead=lead)
+            await self.lead_status_history_repository.create(
+                history=LeadStatusHistory(
+                    lead_id=lead.id,
+                    changed_by_user_id=user.id,
+                    old_status=None,
+                    new_status=LeadStatus.LEAD_SUBMITTED,
+                )
+            )
 
             await self.session.commit()
             await self.session.refresh(lead)
@@ -74,6 +98,9 @@ class LeadService:
             await self.session.rollback()
 
             raise ConflictError("Unable to create lead because of a conflicting record")
+        except Exception:
+            await self.session.rollback()
+            raise
 
     async def get_user_leads(
         self,
@@ -106,6 +133,70 @@ class LeadService:
             has_next=page < total_pages,
             has_previous=page > 1,
             items=[LeadListItemResponse.model_validate(lead) for lead in leads],
+        )
+
+    async def get_user_lead_status_board(
+        self, *, lead_id: str, user: User
+    ) -> LeadStatusBoardResponse:
+        lead = await self.lead_repository.get_user_lead_by_lead_id(
+            lead_id=lead_id, user_id=user.id
+        )
+        if lead is None:
+            raise NotFoundError("Lead was not found.")
+
+        history_rows = await self.lead_status_history_repository.get_by_lead_id(
+            lead_id=lead.id
+        )
+        history = [
+            LeadStatusHistoryItem(
+                old_status=entry.old_status,
+                new_status=entry.new_status,
+                reason=entry.reason,
+                changed_at=entry.created_at,
+            )
+            for entry in history_rows
+        ]
+
+        rejection_event = next(
+            (
+                entry
+                for entry in reversed(history_rows)
+                if entry.new_status == LeadStatus.REJECTED
+            ),
+            None,
+        )
+        if lead.status == LeadStatus.REJECTED:
+            active_stage = rejection_event.old_status if rejection_event else None
+            active_index = next(
+                (i for i, (stage, _) in enumerate(STATUS_STAGES) if stage == active_stage),
+                None,
+            )
+        else:
+            active_index = next(
+                (i for i, (stage, _) in enumerate(STATUS_STAGES) if stage == lead.status),
+                None,
+            )
+
+        status_board = [
+            LeadStatusItem(
+                status=stage,
+                label=label,
+                completed=(
+                    lead.status == LeadStatus.DISBURSED
+                    or (active_index is not None and i < active_index)
+                ),
+                current=(lead.status == stage),
+            )
+            for i, (stage, label) in enumerate(STATUS_STAGES)
+        ]
+
+        return LeadStatusBoardResponse(
+            lead=LeadResponse.model_validate(lead),
+            current_status=lead.status,
+            status_board=status_board,
+            outcome=LeadStatus.REJECTED if lead.status == LeadStatus.REJECTED else None,
+            history=history,
+            updated_at=lead.updated_at,
         )
 
     async def update_lead_status(

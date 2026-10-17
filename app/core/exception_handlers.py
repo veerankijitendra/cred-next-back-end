@@ -24,6 +24,9 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
     if exc.error_code == "FORBIDDEN":
         http_status = status.HTTP_403_FORBIDDEN
 
+    if exc.error_code == "NOT_FOUND":
+        http_status = status.HTTP_404_NOT_FOUND
+
     if exc.error_code == "TOO_MANY_REQUESTS":
         http_status = status.HTTP_429_TOO_MANY_REQUESTS
 

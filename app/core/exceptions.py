@@ -55,3 +55,10 @@ class TooManyRequestsError(AppException):
             message=message,
             error_code="TOO_MANY_REQUESTS",
         )
+
+
+class NotFoundError(AppException):
+    """Raised when a requested resource does not exist or is not visible."""
+
+    def __init__(self, message: str):
+        super().__init__(message=message, error_code="NOT_FOUND")

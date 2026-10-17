@@ -21,6 +21,16 @@ class LeadRepository:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_user_lead_by_lead_id(
+        self, *, lead_id: str, user_id: UUID
+    ) -> Lead | None:
+        statement = select(Lead).where(
+            Lead.lead_id == lead_id,
+            Lead.created_by_user_id == user_id,
+        )
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none()
+
     async def get_leads_by_status(self, status: LeadStatus) -> list[Lead]:
         query = select(Lead).where(Lead.status == status)
         result = await self.session.execute(query)

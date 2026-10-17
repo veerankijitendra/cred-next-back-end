@@ -6,7 +6,13 @@ from app.db.session import get_db
 from app.models.user import User
 from app.repositories.lead import LeadRepository
 from app.repositories.lead_status_history import LeadStatusHistoryRepository
-from app.schemas.lead import LeadListQuery, LeadListResponse, LeadRequest, LeadResponse
+from app.schemas.lead import (
+    LeadListQuery,
+    LeadListResponse,
+    LeadRequest,
+    LeadResponse,
+    LeadStatusBoardResponse,
+)
 from app.services.lead import LeadService
 
 router = APIRouter(prefix="/lead", tags=["Leads"])
@@ -45,3 +51,15 @@ async def get_leads(
     )
 
     return leads
+
+
+@router.get("/{lead_id}/status-board", response_model=LeadStatusBoardResponse)
+async def get_lead_status_board(
+    lead_id: str,
+    current_user: User = Depends(get_current_user),
+    service: LeadService = Depends(get_lead_service),
+) -> LeadStatusBoardResponse:
+    return await service.get_user_lead_status_board(
+        lead_id=lead_id,
+        user=current_user,
+    )

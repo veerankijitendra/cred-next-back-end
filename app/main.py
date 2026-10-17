@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,7 +14,7 @@ from app.core.exception_handlers import (
 )
 from app.core.config import settings
 from app.core.exceptions import AppException
-from app.core.logging_config import setup_logging
+from app.core.logging_config import request_id_context, setup_logging
 from app.core.rate_limit import enforce_auth_rate_limit
 
 setup_logging()
@@ -26,10 +28,16 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 
 @app.middleware("http")
 async def auth_rate_limit_middleware(request: Request, call_next):
-    limited_response = await enforce_auth_rate_limit(request)
-    if limited_response is not None:
-        return limited_response
-    return await call_next(request)
+    request_id = uuid4().hex
+    context_token = request_id_context.set(request_id)
+    try:
+        response = await enforce_auth_rate_limit(request)
+        if response is None:
+            response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        request_id_context.reset(context_token)
 
 
 app.add_middleware(
@@ -38,6 +46,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    expose_headers=["X-Request-ID"],
     max_age=600,
 )
 

@@ -10,6 +10,10 @@ Configure `CORS_ALLOWED_ORIGINS` as a comma-separated list of exact frontend ori
 
 The built-in authentication rate limiter is bounded and process-local. Enforce equal or stricter limits at a shared gateway in multi-worker or multi-instance deployments. It keys by direct client IP; only use proxy-derived addresses if the trusted proxy configuration is explicit.
 
+## Operational logging
+
+The API emits structured JSON logs to standard output and assigns each request an `X-Request-ID` for correlation. Important authentication and lead lifecycle events use stable event names. OTPs, passwords, tokens, contact details, and request bodies must not be written to logs. Lead status history in the database remains the authoritative user-visible audit trail.
+
 ## Authentication contract
 
 All paths are under `/api/v1/auth`.

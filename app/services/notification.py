@@ -19,9 +19,21 @@ class NotificationService:
         return False
 
     async def _send_phone_otp(self, *, phone_number: str, otp: str) -> bool:
-        logger.warning("OTP delivery is not configured; no phone message was sent, phone number: %s, otp: %s", phone_number, otp)
+        logger.warning(
+            "OTP delivery is not configured",
+            extra={
+                "event": "otp.delivery_unconfigured",
+                "channel": OTPChannel.PHONE.value,
+            },
+        )
         return False
 
     async def _send_email_otp(self, *, email: str, otp: str) -> bool:
-        logger.warning("OTP delivery is not configured; no email message was sent, email: %s, otp: %s", email, otp)
+        logger.warning(
+            "OTP delivery is not configured",
+            extra={
+                "event": "otp.delivery_unconfigured",
+                "channel": OTPChannel.EMAIL.value,
+            },
+        )
         return False

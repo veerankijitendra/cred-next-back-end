@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import logging
 from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +23,8 @@ from app.repositories.user import UserRepository
 from app.schemas.auth import RegisterRequest, RegisterResponse
 from app.services.notification import NotificationService
 from app.services.otp import OTPService
+
+logger = logging.getLogger(__name__)
 
 class AuthService:
     def __init__(self, session: AsyncSession):
@@ -92,15 +95,35 @@ class AuthService:
         user = await self.user_repository.get_by_email(email=email)
 
         if not user:
+            logger.warning(
+                "Login failed",
+                extra={"event": "auth.login_failed", "reason": "invalid_credentials"},
+            )
             raise UnauthorizedError(message="Invalid email or password")
 
         if not user.password_hash:
+            logger.warning(
+                "Login failed",
+                extra={"event": "auth.login_failed", "reason": "invalid_credentials"},
+            )
             raise UnauthorizedError(message="Invalid email or password")
 
         if not verify_password(password=password, password_hash=user.password_hash):
+            logger.warning(
+                "Login failed",
+                extra={"event": "auth.login_failed", "reason": "invalid_credentials"},
+            )
             raise UnauthorizedError(message="Invalid email or password")
 
         if not user.is_verified:
+            logger.warning(
+                "Login failed",
+                extra={
+                    "event": "auth.login_failed",
+                    "reason": "account_unverified",
+                    "user_id": str(user.id),
+                },
+            )
             raise ForbiddenError(
                 message="Please verify your account before logging in."
             )
@@ -123,6 +146,11 @@ class AuthService:
             user_id=str(user.id), role=str(user.role), session_id=auth_session.id
         )
         await self.session.commit()
+
+        logger.info(
+            "Login succeeded",
+            extra={"event": "auth.login_succeeded", "user_id": str(user.id)},
+        )
 
         return access_token, refresh_token
 
@@ -148,6 +176,13 @@ class AuthService:
             if auth_session.revoked_at is None:
                 auth_session.revoked_at = now
                 await self.session.commit()
+            logger.warning(
+                "Refresh token reuse detected; session revoked",
+                extra={
+                    "event": "auth.refresh_token_reuse",
+                    "user_id": str(auth_session.user_id),
+                },
+            )
             raise UnauthorizedError(message="Refresh token reuse detected; session revoked.")
         if auth_session.revoked_at is not None or auth_session.expires_at <= now or credential.expires_at <= now:
             raise UnauthorizedError(message="Refresh session is expired or revoked.")

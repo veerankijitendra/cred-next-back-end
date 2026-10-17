@@ -1,4 +1,5 @@
 import math
+import logging
 import re
 from uuid import UUID, uuid4
 
@@ -30,6 +31,8 @@ STATUS_STAGES = (
     (LeadStatus.BANK_PROCESS, "Bank Process"),
     (LeadStatus.DISBURSED, "Disbursed"),
 )
+
+logger = logging.getLogger(__name__)
 
 
 class LeadService:
@@ -90,6 +93,16 @@ class LeadService:
             )
 
             await self.session.commit()
+            logger.info(
+                "Lead created",
+                extra={
+                    "event": "lead.created",
+                    "actor_user_id": str(user.id),
+                    "lead_id": lead.lead_id,
+                    "application_type": application_type.value,
+                    "new_status": LeadStatus.LEAD_SUBMITTED.value,
+                },
+            )
             await self.session.refresh(lead)
 
             return lead
@@ -233,7 +246,16 @@ class LeadService:
             # 3. Commit BOTH operations together
 
             await self.session.commit()
-
+            logger.info(
+                "Lead status changed",
+                extra={
+                    "event": "lead.status_changed",
+                    "actor_user_id": str(changed_by_user.id),
+                    "lead_id": lead.lead_id,
+                    "old_status": str(old_status),
+                    "new_status": new_status.value,
+                },
+            )
             await self.session.refresh(lead)
 
             return lead

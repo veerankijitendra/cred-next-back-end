@@ -11,8 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
-    logger.warning("Application error code=%s | path=%s", exc.error_code, request.url.path)
-
     http_status = status.HTTP_500_INTERNAL_SERVER_ERROR
 
     if exc.error_code == "CONFLICT":
@@ -29,6 +27,17 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
 
     if exc.error_code == "TOO_MANY_REQUESTS":
         http_status = status.HTTP_429_TOO_MANY_REQUESTS
+
+    logger.warning(
+        "Application request failed",
+        extra={
+            "event": "http.application_error",
+            "http_method": request.method,
+            "path": request.url.path,
+            "status_code": http_status,
+            "error_code": exc.error_code,
+        },
+    )
 
     return JSONResponse(
         status_code=http_status,
@@ -47,7 +56,16 @@ async def validation_exception_handler(
         {"loc": error.get("loc", ()), "msg": error.get("msg", "Invalid value"), "type": error.get("type", "value_error")}
         for error in exc.errors()
     ]
-    logger.warning("Validation error | path=%s | fields=%s", request.url.path, [item["loc"] for item in sanitized_details])
+    logger.warning(
+        "Request validation failed",
+        extra={
+            "event": "http.validation_error",
+            "http_method": request.method,
+            "path": request.url.path,
+            "status_code": status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "validation_fields": [item["loc"] for item in sanitized_details],
+        },
+    )
 
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -64,7 +82,17 @@ async def sqlalchemy_exception_handler(
     request: Request,
     exc: SQLAlchemyError,
 ) -> JSONResponse:
-    logger.error("Unexpected database error | path=%s | exception_type=%s", request.url.path, type(exc).__name__)
+    logger.error(
+        "Database request failed",
+        extra={
+            "event": "http.database_error",
+            "http_method": request.method,
+            "path": request.url.path,
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "error_code": "DATABASE_ERROR",
+            "exception_type": type(exc).__name__,
+        },
+    )
 
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -80,7 +108,17 @@ async def unhandled_exception_handler(
     request: Request,
     exc: Exception,
 ) -> JSONResponse:
-    logger.error("Unhandled application error | path=%s | exception_type=%s", request.url.path, type(exc).__name__)
+    logger.error(
+        "Unhandled request error",
+        extra={
+            "event": "http.unhandled_error",
+            "http_method": request.method,
+            "path": request.url.path,
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "error_code": "INTERNAL_SERVER_ERROR",
+            "exception_type": type(exc).__name__,
+        },
+    )
 
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

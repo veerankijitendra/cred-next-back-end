@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ForbiddenError, UnauthorizedError
 from app.core.security import decode_token
 from app.db.session import get_db
+from app.enums.user import UserRoleEnum
 from app.models.user import User
 from app.models.refresh_session import RefreshSession
 from app.repositories.user import UserRepository
@@ -78,3 +79,11 @@ def require_role(required_role: str) -> Callable[..., Coroutine[Any, Any, User]]
         return current_user
 
     return role_checker
+
+
+async def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role not in {UserRoleEnum.ADMIN, UserRoleEnum.SUPER_ADMIN}:
+        raise ForbiddenError(
+            message="You don't have permission to access this resource"
+        )
+    return current_user

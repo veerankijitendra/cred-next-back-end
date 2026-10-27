@@ -1,6 +1,8 @@
+from datetime import UTC, date, datetime, time
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import ApplicationType, LeadStatus, LoanType
@@ -129,3 +131,66 @@ class LeadRepository:
         await self.session.delete(lead)
 
         await self.session.flush()
+
+    async def get_admin_leads_paginated(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        search: str | None = None,
+        status: LeadStatus | None = None,
+        loan_type: LoanType | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> tuple[list[Lead], int]:
+        filters = []
+
+        if start_date:
+            start_datetime = datetime.combine(start_date, time.min, tzinfo=UTC)
+            filters.append(Lead.created_at >= start_datetime)
+
+        if end_date:
+            end_datetime = datetime.combine(end_date, time.max, tzinfo=UTC)
+            filters.append(Lead.created_at <= end_datetime)
+
+        if status:
+            filters.append(Lead.status == status)
+
+        if loan_type:
+            filters.append(Lead.loan_type == loan_type)
+
+        if search:
+            search_term = f"%{search.strip()}%"
+            filters.append(
+                or_(
+                    Lead.lead_id.ilike(search_term),
+                    Lead.full_name.ilike(search_term),
+                    Lead.email.ilike(search_term),
+                    Lead.contact_number.ilike(search_term),
+                    Lead.city.ilike(search_term),
+                )
+            )
+
+        count_statement = select(func.count(Lead.id))
+        if filters:
+            count_statement = count_statement.where(*filters)
+
+        count_result = await self.session.execute(count_statement)
+        total = count_result.scalar_one()
+
+        offset = (page - 1) * page_size
+
+        statement = (
+            select(Lead)
+            .options(selectinload(Lead.created_by), selectinload(Lead.referred_by))
+            .order_by(Lead.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        if filters:
+            statement = statement.where(*filters)
+
+        result = await self.session.execute(statement)
+        leads = list(result.scalars().all())
+
+        return leads, total

@@ -1,3 +1,4 @@
+from datetime import date
 import math
 import logging
 import re
@@ -6,7 +7,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import ApplicationType, LeadStatus
+from app.core.constants import ApplicationType, LeadStatus, LoanType
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.core.lead_id import generate_lead_id
 from app.models.lead import Lead
@@ -14,6 +15,7 @@ from app.models.lead_status_history import LeadStatusHistory
 from app.models.user import User
 from app.repositories.lead import LeadRepository
 from app.repositories.lead_status_history import LeadStatusHistoryRepository
+from app.schemas.admin_lead import AdminLeadItemResponse, AdminLeadListResponse, LeadUserInfo
 from app.schemas.lead import (
     LeadListItemResponse,
     LeadListResponse,
@@ -263,3 +265,59 @@ class LeadService:
             await self.session.rollback()
 
             raise
+
+
+    async def get_admin_leads(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        search: str | None = None,
+        status: LeadStatus | None = None,
+        loan_type: LoanType | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> AdminLeadListResponse:
+        leads, total = await self.lead_repository.get_admin_leads_paginated(
+            page=page,
+            page_size=page_size,
+            search=search,
+            status=status,
+            loan_type=loan_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        total_pages = math.ceil(total / page_size) if total > 0 else 0
+
+        items = [
+            AdminLeadItemResponse(
+                id=lead.id,
+                lead_id=lead.lead_id,
+                application_type=lead.application_type,
+                loan_type=lead.loan_type,
+                full_name=lead.full_name,
+                contact_number=lead.contact_number,
+                email=lead.email,
+                city=lead.city,
+                loan_amount=lead.loan_amount,
+                monthly_income=lead.monthly_income,
+                credit_score=lead.credit_score,
+                status=lead.status,
+                created_by=LeadUserInfo.model_validate(lead.created_by),
+                referred_by=LeadUserInfo.model_validate(lead.referred_by) if lead.referred_by else None,
+                created_at=lead.created_at,
+                updated_at=lead.updated_at,
+            )
+            for lead in leads
+        ]
+
+        return AdminLeadListResponse(
+            items=items,
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=total_pages,
+            has_next=page < total_pages,
+            has_previous=page > 1,
+        )

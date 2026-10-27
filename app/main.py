@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.api.v1 import auth, dashboard, health, leads
+from app.api.v1 import admin_leads, auth, dashboard, health, leads
 from app.core.exception_handlers import (
     app_exception_handler,
     sqlalchemy_exception_handler,
@@ -54,3 +54,4 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(leads.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
+app.include_router(admin_leads.router, prefix="/api/v1")

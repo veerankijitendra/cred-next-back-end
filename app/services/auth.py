@@ -128,6 +128,19 @@ class AuthService:
                 message="Please verify your account before logging in."
             )
 
+        if not user.is_active:
+            logger.warning(
+                "Login failed",
+                extra={
+                    "event": "auth.login_failed",
+                    "reason": "account_inactive",
+                    "user_id": str(user.id),
+                },
+            )
+            raise ForbiddenError(
+                message="Your account has been deactivated. Please contact an administrator."
+            )
+
         now = datetime.now(UTC)
         auth_session = RefreshSession(
             user_id=user.id,

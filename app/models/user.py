@@ -23,6 +23,8 @@ class User(BaseModelMixin, Base):
         role: UserRoleEnum = UserRoleEnum.USER,
         refresh_token_hash: str | None = None,
         is_verified: bool = False,
+        is_active: bool = True,
+        title: str | None = None,
     ):
         self.id = id
         self.reference_id = reference_id
@@ -33,6 +35,8 @@ class User(BaseModelMixin, Base):
         self.role = role
         self.refresh_token_hash = refresh_token_hash
         self.is_verified = is_verified
+        self.is_active = is_active
+        self.title = title
 
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     email: Mapped[str] = mapped_column(
@@ -57,5 +61,7 @@ class User(BaseModelMixin, Base):
     )
 
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
 
     reference_id: Mapped[str] = mapped_column(String(45), unique=True, nullable=False)

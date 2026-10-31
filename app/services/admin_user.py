@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.core.reference_id import generate_reference_id
 from app.core.security import hash_password
 from app.enums.user import UserRoleEnum
@@ -15,6 +15,7 @@ from app.models.refresh_session import RefreshSession
 from app.models.user import User
 from app.repositories.admin_user import AdminUserRepository
 from app.schemas.admin_user import (
+    AdminUserCreatedResponse,
     AdminUserItemResponse,
     AdminUserListQuery,
     AdminUserListResponse,
@@ -106,7 +107,11 @@ class AdminUserService:
         *,
         payload: CreateAdminUserRequest,
         actor: User,
-    ) -> AdminUserItemResponse:
+    ) -> AdminUserCreatedResponse:
+        # Privilege Escalation Guard: Only SUPER_ADMIN can create another SUPER_ADMIN
+        if payload.role == UserRoleEnum.SUPER_ADMIN and actor.role != UserRoleEnum.SUPER_ADMIN:
+            raise ForbiddenError(message="Only super administrators can create or assign super admin roles.")
+
         existing_email = await self.repository.get_by_email(payload.email)
         if existing_email:
             raise ConflictError("Email is already registered.")
@@ -116,8 +121,12 @@ class AdminUserService:
             raise ConflictError("Phone number is already registered.")
 
         user_id = uuid4()
-        temp_secret = secrets.token_urlsafe(24)
-        password_hash = hash_password(password=temp_secret)
+        temp_password = payload.temporary_password or secrets.token_urlsafe(9)
+        password_hash = hash_password(password=temp_password)
+
+        # Internal staff created by administrative team are pre-verified so they can log in immediately
+        is_staff = payload.role in {UserRoleEnum.ADMIN, UserRoleEnum.SUPER_ADMIN}
+        is_verified = True if is_staff else False
 
         user = User(
             id=user_id,
@@ -127,7 +136,7 @@ class AdminUserService:
             reference_id=generate_reference_id(user_id=user_id),
             password_hash=password_hash,
             role=payload.role,
-            is_verified=False,
+            is_verified=is_verified,
             is_active=(payload.account_status == "active"),
             title=payload.title.strip() if payload.title else None,
         )
@@ -146,7 +155,11 @@ class AdminUserService:
                     "role": user.role.value,
                 },
             )
-            return self._to_item_response(user, assigned_leads_count=0)
+            base_item = self._to_item_response(user, assigned_leads_count=0)
+            return AdminUserCreatedResponse(
+                **base_item.model_dump(),
+                temporary_password=temp_password,
+            )
         except Exception:
             await self.session.rollback()
             raise
@@ -161,7 +174,18 @@ class AdminUserService:
         if user is None:
             raise NotFoundError("User was not found.")
 
+        # Guard: Regular ADMIN cannot alter or deactivate a SUPER_ADMIN
+        if user.role == UserRoleEnum.SUPER_ADMIN and actor.role != UserRoleEnum.SUPER_ADMIN:
+            raise ForbiddenError(message="Only super administrators can alter super admin accounts.")
+
         new_status = not user.is_active
+
+        # Last Super Admin Safeguard: Cannot deactivate the sole remaining active Super Admin
+        if user.role == UserRoleEnum.SUPER_ADMIN and user.is_active and not new_status:
+            active_super_admins = await self.repository.count_active_super_admins()
+            if active_super_admins <= 1:
+                raise ConflictError("Cannot deactivate the sole remaining active Super Admin.")
+
         user.is_active = new_status
 
         # If deactivated, revoke active sessions immediately
@@ -184,6 +208,44 @@ class AdminUserService:
                     "actor_user_id": str(actor.id),
                     "target_user_id": str(user.id),
                     "new_status": "active" if user.is_active else "inactive",
+                },
+            )
+            return self._to_item_response(user)
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    async def update_user_role(
+        self,
+        *,
+        identifier: str,
+        new_role: UserRoleEnum,
+        actor: User,
+    ) -> AdminUserItemResponse:
+        if actor.role != UserRoleEnum.SUPER_ADMIN:
+            raise ForbiddenError(message="Only super administrators can change user roles.")
+
+        user = await self.repository.get_by_id_or_ref(identifier)
+        if user is None:
+            raise NotFoundError("User was not found.")
+
+        if user.role == UserRoleEnum.SUPER_ADMIN and new_role != UserRoleEnum.SUPER_ADMIN:
+            active_super_admins = await self.repository.count_active_super_admins()
+            if active_super_admins <= 1:
+                raise ConflictError("Cannot demote the sole remaining active Super Admin.")
+
+        user.role = new_role
+        try:
+            await self.repository.update_role(user, new_role)
+            await self.session.commit()
+            await self.session.refresh(user)
+            logger.info(
+                "User role updated",
+                extra={
+                    "event": "admin.user_role_updated",
+                    "actor_user_id": str(actor.id),
+                    "target_user_id": str(user.id),
+                    "new_role": new_role.value,
                 },
             )
             return self._to_item_response(user)

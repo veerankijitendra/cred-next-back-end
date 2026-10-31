@@ -87,3 +87,11 @@ async def require_admin(current_user: User = Depends(get_current_user)) -> User:
             message="You don't have permission to access this resource"
         )
     return current_user
+
+
+async def require_super_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != UserRoleEnum.SUPER_ADMIN:
+        raise ForbiddenError(
+            message="Super administrator privileges are required for this action."
+        )
+    return current_user

@@ -142,3 +142,17 @@ class AdminUserRepository:
         await self.session.flush()
         return user
 
+    async def update_role(self, user: User, role: UserRoleEnum) -> User:
+        user.role = role
+        await self.session.flush()
+        return user
+
+    async def count_active_super_admins(self) -> int:
+        stmt = select(func.count(User.id)).where(
+            User.role == UserRoleEnum.SUPER_ADMIN,
+            User.is_active.is_(True),
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one() or 0
+
+

@@ -71,4 +71,19 @@ class CreateAdminUserRequest(BaseModel):
     role: UserRoleEnum = UserRoleEnum.ADMIN
     account_status: AccountStatus = "active"
     title: str | None = Field(default=None, max_length=100)
+    temporary_password: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=64,
+        description="Optional temporary password. If omitted, one will be generated automatically.",
+    )
+
+
+class AdminUserCreatedResponse(AdminUserItemResponse):
+    temporary_password: str | None = None
+
+
+class UpdateUserRoleRequest(BaseModel):
+    role: UserRoleEnum
+
 

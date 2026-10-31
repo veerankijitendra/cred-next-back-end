@@ -16,6 +16,7 @@ from app.schemas.admin_user import (
 )
 from app.services.admin_user import AdminUserService
 from app.services.auth import AuthService
+from scripts.create_superadmin import validate_email, validate_phone
 
 
 def run_coroutine(coro):
@@ -120,7 +121,7 @@ class AdminUsersTests(unittest.TestCase):
         fake_repo = _FakeAdminUserRepository(users=[actor])
         service = AdminUserService(session=_FakeSession(), repository=fake_repo)
 
-        # Successfully create user
+        # Successfully create user with auto-generated temp password
         req = CreateAdminUserRequest(
             name="Kavita Lakhani",
             email="kavita@crednexa.com",
@@ -135,10 +136,169 @@ class AdminUsersTests(unittest.TestCase):
         self.assertEqual(created.avatar_initials, "KL")
         self.assertEqual(created.title, "Credit Risk Auditor")
         self.assertEqual(created.account_status, "active")
+        self.assertEqual(created.verification_status, "verified")
+        self.assertIsNotNone(created.temporary_password)
+        self.assertGreaterEqual(len(created.temporary_password), 8)
 
         # Conflict on duplicate email
         with self.assertRaises(ConflictError):
             run_coroutine(service.create_user(payload=req, actor=actor))
+
+    def test_privilege_escalation_prevented(self):
+        admin_actor = User(
+            id=uuid4(),
+            name="Regular Admin",
+            email="admin@example.com",
+            phone_number="9999999990",
+            reference_id="CNX-REF-ADM01",
+            role=UserRoleEnum.ADMIN,
+        )
+        fake_repo = _FakeAdminUserRepository(users=[admin_actor])
+        service = AdminUserService(session=_FakeSession(), repository=fake_repo)
+
+        # Regular Admin attempting to create SUPER_ADMIN must be blocked with ForbiddenError
+        req = CreateAdminUserRequest(
+            name="Sneaky Admin",
+            email="sneaky@crednexa.com",
+            phone_number="9889810021",
+            role=UserRoleEnum.SUPER_ADMIN,
+            account_status="active",
+        )
+        with self.assertRaises(ForbiddenError):
+            run_coroutine(service.create_user(payload=req, actor=admin_actor))
+
+    def test_create_user_with_explicit_temporary_password(self):
+        actor = User(
+            id=uuid4(),
+            name="Super Admin",
+            email="super@example.com",
+            phone_number="9999999999",
+            reference_id="CNX-REF-SUPER",
+            role=UserRoleEnum.SUPER_ADMIN,
+        )
+        fake_repo = _FakeAdminUserRepository(users=[actor])
+        service = AdminUserService(session=_FakeSession(), repository=fake_repo)
+
+        req = CreateAdminUserRequest(
+            name="Explicit Staff",
+            email="explicit@crednexa.com",
+            phone_number="9889810022",
+            role=UserRoleEnum.ADMIN,
+            account_status="active",
+            temporary_password="StaffPassword123!",
+        )
+        created = run_coroutine(service.create_user(payload=req, actor=actor))
+        self.assertEqual(created.temporary_password, "StaffPassword123!")
+        self.assertEqual(created.verification_status, "verified")
+
+    def test_prevent_regular_admin_from_deactivating_superadmin(self):
+        admin_actor = User(
+            id=uuid4(),
+            name="Regular Admin",
+            email="admin@example.com",
+            phone_number="9999999990",
+            reference_id="CNX-REF-ADM01",
+            role=UserRoleEnum.ADMIN,
+        )
+        super_target = User(
+            id=uuid4(),
+            name="Boss",
+            email="boss@crednexa.com",
+            phone_number="9999999995",
+            reference_id="CNX-REF-BOSS",
+            role=UserRoleEnum.SUPER_ADMIN,
+            is_active=True,
+        )
+        fake_repo = _FakeAdminUserRepository(users=[admin_actor, super_target])
+        service = AdminUserService(session=_FakeSession(), repository=fake_repo)
+
+        with self.assertRaises(ForbiddenError):
+            run_coroutine(service.toggle_user_status(identifier=str(super_target.id), actor=admin_actor))
+
+    def test_prevent_deactivating_last_active_superadmin(self):
+        super_actor = User(
+            id=uuid4(),
+            name="Sole Boss",
+            email="boss@crednexa.com",
+            phone_number="9999999995",
+            reference_id="CNX-REF-BOSS",
+            role=UserRoleEnum.SUPER_ADMIN,
+            is_active=True,
+        )
+        fake_repo = _FakeAdminUserRepository(users=[super_actor])
+        service = AdminUserService(session=_FakeSession(), repository=fake_repo)
+
+        with self.assertRaises(ConflictError):
+            run_coroutine(service.toggle_user_status(identifier=str(super_actor.id), actor=super_actor))
+
+    def test_update_user_role(self):
+        super_actor = User(
+            id=uuid4(),
+            name="Super Admin",
+            email="super@example.com",
+            phone_number="9999999999",
+            reference_id="CNX-REF-SUPER",
+            role=UserRoleEnum.SUPER_ADMIN,
+            is_active=True,
+        )
+        regular_admin = User(
+            id=uuid4(),
+            name="Regular Admin",
+            email="admin@example.com",
+            phone_number="9999999990",
+            reference_id="CNX-REF-ADM01",
+            role=UserRoleEnum.ADMIN,
+            is_active=True,
+        )
+        target_user = User(
+            id=uuid4(),
+            name="Target User",
+            email="target@example.com",
+            phone_number="9999999998",
+            reference_id="CNX-REF-TARGET",
+            role=UserRoleEnum.USER,
+            is_active=True,
+        )
+        fake_repo = _FakeAdminUserRepository(users=[super_actor, regular_admin, target_user])
+        service = AdminUserService(session=_FakeSession(), repository=fake_repo)
+
+        # Super Admin promotes user to ADMIN
+        promoted = run_coroutine(
+            service.update_user_role(
+                identifier=str(target_user.id),
+                new_role=UserRoleEnum.ADMIN,
+                actor=super_actor,
+            )
+        )
+        self.assertEqual(promoted.role, UserRoleEnum.ADMIN)
+
+        # Regular Admin cannot update roles
+        with self.assertRaises(ForbiddenError):
+            run_coroutine(
+                service.update_user_role(
+                    identifier=str(target_user.id),
+                    new_role=UserRoleEnum.SUPER_ADMIN,
+                    actor=regular_admin,
+                )
+            )
+
+        # Cannot demote sole remaining Super Admin
+        with self.assertRaises(ConflictError):
+            run_coroutine(
+                service.update_user_role(
+                    identifier=str(super_actor.id),
+                    new_role=UserRoleEnum.ADMIN,
+                    actor=super_actor,
+                )
+            )
+
+    def test_create_superadmin_script_validators(self):
+        self.assertTrue(validate_email("admin@crednexa.com"))
+        self.assertFalse(validate_email("invalid-email"))
+        self.assertTrue(validate_phone("9820121010"))
+        self.assertTrue(validate_phone("+91 98201 21010"))
+        self.assertFalse(validate_phone("1234567890"))  # Doesn't start with 6-9
+        self.assertFalse(validate_phone("98201"))       # Too short
 
     def test_admin_user_service_toggle_status_and_revocation(self):
         actor = User(
@@ -277,6 +437,16 @@ class _FakeAdminUserRepository:
             "pending_kyc": pending_kyc,
         }
 
+    async def count_active_super_admins(self) -> int:
+        return len([
+            u for u in self.users.values()
+            if u.role == UserRoleEnum.SUPER_ADMIN and u.is_active
+        ])
+
+    async def update_role(self, user: User, role: UserRoleEnum) -> User:
+        user.role = role
+        return user
+
     async def get_by_id(self, user_id):
         return self.users.get(user_id)
 
@@ -305,4 +475,3 @@ class _FakeAdminUserRepository:
 
 if __name__ == "__main__":
     unittest.main()
-

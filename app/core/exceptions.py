@@ -39,6 +39,26 @@ class ForbiddenError(AppException):
         super().__init__(message=message, error_code="FORBIDDEN")
 
 
+class AccountUnverifiedError(ForbiddenError):
+    """Raised when an unverified user attempts to log in."""
+
+    def __init__(
+        self,
+        *,
+        message: str = "Please verify your account before logging in.",
+        user_id: str,
+        channel: str = "phone",
+    ) -> None:
+        super().__init__(message=message)
+        self.error_code = "ACCOUNT_UNVERIFIED"
+        self.user_id = user_id
+        self.channel = channel
+        self.details = {
+            "user_id": user_id,
+            "verification_channel": channel,
+        }
+
+
 class DatabaseError(AppException):
     """Raised when an unexpected database error occurs."""
 

@@ -43,6 +43,10 @@ class UserRepository:
 
         return user
 
+    async def delete(self, *, user: User) -> None:
+        await self.session.delete(user)
+        await self.session.flush()
+
     async def get_by_reference_id(self, *, reference_id: str) -> User | None:
         result = await self.session.execute(
             select(User).where(User.reference_id == reference_id)

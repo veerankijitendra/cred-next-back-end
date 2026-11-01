@@ -19,7 +19,7 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
     if exc.error_code == "UNAUTHORIZED":
         http_status = status.HTTP_401_UNAUTHORIZED
 
-    if exc.error_code == "FORBIDDEN":
+    if exc.error_code in ("FORBIDDEN", "ACCOUNT_UNVERIFIED"):
         http_status = status.HTTP_403_FORBIDDEN
 
     if exc.error_code == "NOT_FOUND":
@@ -39,13 +39,17 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
         },
     )
 
+    content = {
+        "success": False,
+        "message": exc.message,
+        "error_code": exc.error_code,
+    }
+    if hasattr(exc, "details") and exc.details:
+        content["details"] = exc.details
+
     return JSONResponse(
         status_code=http_status,
-        content={
-            "success": False,
-            "message": exc.message,
-            "error_code": exc.error_code,
-        },
+        content=content,
     )
 
 

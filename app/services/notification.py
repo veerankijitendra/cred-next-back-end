@@ -9,7 +9,6 @@ class NotificationService:
     async def send_otp(
         self, *, channel: OTPChannel, destination: str, otp: str
     ) -> bool:
-
         if channel == OTPChannel.PHONE:
             return await self._send_phone_otp(phone_number=destination, otp=otp)
 
@@ -19,21 +18,27 @@ class NotificationService:
         return False
 
     async def _send_phone_otp(self, *, phone_number: str, otp: str) -> bool:
-        logger.warning(
-            "OTP delivery is not configured",
+        # TODO: When an SMS provider (e.g. Twilio, AWS SNS) is configured, dispatch via its API client here.
+        logger.info(
+            "🔐 [DEV OTP DELIVERY] Channel: PHONE | Destination: %s | OTP Code: %s",
+            phone_number,
+            otp,
             extra={
-                "event": "otp.delivery_unconfigured",
+                "event": "otp.dev_delivery",
                 "channel": OTPChannel.PHONE.value,
             },
         )
-        return False
+        return True
 
     async def _send_email_otp(self, *, email: str, otp: str) -> bool:
-        logger.warning(
-            "OTP delivery is not configured",
+        # TODO: When an Email provider (e.g. SendGrid, AWS SES) is configured, dispatch via its API client here.
+        logger.info(
+            "🔐 [DEV OTP DELIVERY] Channel: EMAIL | Destination: %s | OTP Code: %s",
+            email,
+            otp,
             extra={
-                "event": "otp.delivery_unconfigured",
+                "event": "otp.dev_delivery",
                 "channel": OTPChannel.EMAIL.value,
             },
         )
-        return False
+        return True

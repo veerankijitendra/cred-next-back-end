@@ -7,7 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import OTPChannel
 from app.core.config import settings
-from app.core.exceptions import ConflictError, ForbiddenError, UnauthorizedError
+from app.core.exceptions import (
+    AccountUnverifiedError,
+    ConflictError,
+    ForbiddenError,
+    TooManyRequestsError,
+    UnauthorizedError,
+)
 from app.core.reference_id import generate_reference_id
 from app.core.security import (
     create_access_token,
@@ -26,45 +32,95 @@ from app.services.otp import OTPService
 
 logger = logging.getLogger(__name__)
 
+
 class AuthService:
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession,
+        otp_service: OTPService | None = None,
+        notification_service: NotificationService | None = None,
+    ):
         self.session = session
         self.user_repository = UserRepository(session=session)
         self.refresh_repository = RefreshSessionRepository(session=session)
+        self.otp_service = otp_service or OTPService(session=session)
+        self.notification_service = notification_service or NotificationService()
 
     async def register_user(self, *, data: RegisterRequest) -> RegisterResponse:
         existing_email = await self.user_repository.get_by_email(email=data.email)
-
-        if existing_email:
-            raise ConflictError("Email is already registered.")
-
         existing_phone_number = await self.user_repository.get_by_phone_number(
             phone_number=data.phone_number
         )
 
-        if existing_phone_number:
-            raise ConflictError("Phone number is already registered.")
+        otp_service = self.otp_service
+        notification_service = self.notification_service
 
-        user_id = uuid4()
+        if existing_email:
+            if existing_email.is_verified:
+                raise ConflictError("Email is already registered.")
 
-        password_hash = hash_password(password=data.password)
+            # Email exists and is unverified: user is retrying or updating registration
+            if existing_phone_number and existing_phone_number.id != existing_email.id:
+                if existing_phone_number.is_verified:
+                    raise ConflictError("Phone number is already registered.")
+                # The phone number belongs to another unverified placeholder; clean it up
+                await self.user_repository.delete(user=existing_phone_number)
 
-        user = User(
-            id=user_id,
-            reference_id=generate_reference_id(user_id=user_id),
-            name=data.name,
-            email=data.email,
-            phone_number=data.phone_number,
-            password_hash=password_hash,
-        )
+            phone_changed = existing_email.phone_number != data.phone_number
+
+            # Enforce cooldown on the same phone number to avoid OTP spamming
+            if not phone_changed:
+                latest_otp = await otp_service.repository.get_latest(
+                    user_id=existing_email.id, channel=OTPChannel.PHONE, for_update=True
+                )
+                if latest_otp:
+                    now = datetime.now(UTC)
+                    cooldown_until = latest_otp.created_at + timedelta(
+                        seconds=settings.otp_resend_cooldown_seconds
+                    )
+                    if now < cooldown_until:
+                        remaining_seconds = int((cooldown_until - now).total_seconds())
+                        raise TooManyRequestsError(
+                            message=f"Please wait {remaining_seconds} seconds before requesting a new OTP"
+                        )
+                    await otp_service.repository.invalidate(otp_verification=latest_otp)
+
+            existing_email.name = data.name
+            existing_email.phone_number = data.phone_number
+            existing_email.password_hash = hash_password(password=data.password)
+
+            user = existing_email
+            is_resume = True
+        else:
+            if existing_phone_number:
+                if existing_phone_number.is_verified:
+                    raise ConflictError("Phone number is already registered.")
+                # Unverified record with different email; clean up stale record
+                await self.user_repository.delete(user=existing_phone_number)
+
+            user_id = uuid4()
+            password_hash = hash_password(password=data.password)
+
+            user = User(
+                id=user_id,
+                reference_id=generate_reference_id(user_id=user_id),
+                name=data.name,
+                email=data.email,
+                phone_number=data.phone_number,
+                password_hash=password_hash,
+            )
+            is_resume = False
+
         try:
-            await self.user_repository.create(user=user)
+            if is_resume:
+                await self.session.flush()
+            else:
+                await self.user_repository.create(user=user)
 
             await self.session.commit()
 
         except IntegrityError:
             await self.session.rollback()
-
             raise ConflictError("Email or phone number is already registered.")
 
         except Exception:
@@ -72,9 +128,6 @@ class AuthService:
             raise
 
         await self.session.refresh(user)
-
-        otp_service = OTPService(session=self.session)
-        notification_service = NotificationService()
 
         otp = await otp_service.create_otp(user_id=user.id, channel=OTPChannel.PHONE)
 
@@ -124,8 +177,10 @@ class AuthService:
                     "user_id": str(user.id),
                 },
             )
-            raise ForbiddenError(
-                message="Please verify your account before logging in."
+            raise AccountUnverifiedError(
+                message="Please verify your account before logging in.",
+                user_id=str(user.id),
+                channel=OTPChannel.PHONE.value,
             )
 
         if not user.is_active:

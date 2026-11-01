@@ -13,9 +13,14 @@ from app.repositories.otp import OTPRepository
 
 
 class OTPService:
-    def __init__(self, *, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        *,
+        session: AsyncSession,
+        repository: OTPRepository | None = None,
+    ) -> None:
         self.session = session
-        self.repository = OTPRepository(session=session)
+        self.repository = repository or OTPRepository(session=session)
 
     def _generate_otp(self) -> str:
         minimum = 10 ** (settings.otp_length - 1)

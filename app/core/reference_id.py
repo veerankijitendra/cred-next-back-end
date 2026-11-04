@@ -3,9 +3,9 @@ from uuid import UUID
 
 def generate_reference_id(user_id: UUID) -> str:
     """
-    Generate a public reference ID from the user's UUID.
+    Generate an uppercase, human-friendly 16-character reference ID.
 
     Example:
-    CNX-REF-550e8400e29b41d4a716446655440000
+    CNX-REF-93AC44FA
     """
-    return f"CNX-REF-{user_id.hex}"
+    return f"CNX-REF-{user_id.hex[:8].upper()}"

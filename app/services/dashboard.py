@@ -52,7 +52,7 @@ class DashboardService:
         )
         total_pages = (total + page_size - 1) // page_size if total else 0
         referral_link = (
-            f"{settings.frontend_base_url}/register?"
+            f"{settings.frontend_base_url}/apply?"
             f"{urlencode({'ref': current_user.reference_id})}"
         )
 

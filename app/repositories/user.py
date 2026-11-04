@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
@@ -48,8 +48,14 @@ class UserRepository:
         await self.session.flush()
 
     async def get_by_reference_id(self, *, reference_id: str) -> User | None:
+        clean_ref = reference_id.strip()
         result = await self.session.execute(
-            select(User).where(User.reference_id == reference_id)
+            select(User).where(
+                or_(
+                    User.reference_id == clean_ref,
+                    func.upper(User.reference_id) == clean_ref.upper(),
+                )
+            )
         )
 
         return result.scalar_one_or_none()

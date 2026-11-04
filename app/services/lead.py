@@ -16,6 +16,7 @@ from app.models.lead_status_history import LeadStatusHistory
 from app.models.user import User
 from app.repositories.lead import LeadRepository
 from app.repositories.lead_status_history import LeadStatusHistoryRepository
+from app.repositories.user import UserRepository
 from app.schemas.admin_lead import (
     AdminLeadItemResponse,
     AdminLeadListResponse,
@@ -49,10 +50,14 @@ class LeadService:
         session: AsyncSession,
         lead_repository: LeadRepository,
         lead_status_history_repository: LeadStatusHistoryRepository,
+        user_repository: UserRepository | None = None,
     ):
         self.session = session
         self.lead_repository = lead_repository
         self.lead_status_history_repository = lead_status_history_repository
+        self.user_repository = user_repository or (
+            UserRepository(session=session) if session is not None else None
+        )
 
     async def create_lead(self, *, lead_request: LeadRequest, user: User):
         def normalize_phone(value: str) -> str:
@@ -66,10 +71,27 @@ class LeadService:
         is_self_application = normalize_phone(lead_request.contact_number) == normalize_phone(user.phone_number)
         if lead_request.application_type == ApplicationType.SELF and not is_self_application:
             raise ConflictError("Self applications must use the authenticated account phone number.")
-        if lead_request.reference_id and lead_request.reference_id != user.reference_id:
-            raise ForbiddenError(message="A referral can only be attributed to the authenticated account.")
 
         application_type = ApplicationType.SELF if is_self_application else ApplicationType.REFERRAL
+        referred_by_user_id: UUID | None = None
+
+        if is_self_application:
+            # Self application: attribute to third-party referrer if a referral code is provided
+            if lead_request.reference_id and self.user_repository:
+                referrer = await self.user_repository.get_by_reference_id(
+                    reference_id=lead_request.reference_id
+                )
+                if referrer and referrer.id != user.id:
+                    referred_by_user_id = referrer.id
+        else:
+            # Referral application submitted by a partner / DSA on behalf of a customer
+            if lead_request.reference_id and self.user_repository:
+                referrer = await self.user_repository.get_by_reference_id(
+                    reference_id=lead_request.reference_id
+                )
+                referred_by_user_id = referrer.id if referrer else user.id
+            else:
+                referred_by_user_id = user.id
 
         lead_uuid = uuid4()
 
@@ -77,7 +99,7 @@ class LeadService:
             id=lead_uuid,
             lead_id=generate_lead_id(lead_id=lead_uuid),
             created_by_user_id=user.id,
-            referred_by_user_id=None if is_self_application else user.id,
+            referred_by_user_id=referred_by_user_id,
             application_type=application_type,
             loan_type=lead_request.loan_type,
             full_name=lead_request.full_name,

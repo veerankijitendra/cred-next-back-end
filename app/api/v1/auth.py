@@ -125,6 +125,7 @@ async def verify_otp(data: VerifyOTPRequest, session: AsyncSession = Depends(get
     await otp_service.verify(user_id=user.id, channel=data.channel, otp=data.otp)
 
     user.is_verified = True
+    user.is_active = True
 
     await session.commit()
 

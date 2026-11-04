@@ -155,4 +155,15 @@ class AdminUserRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one() or 0
 
+    async def count_user_leads(self, user_id: UUID) -> int:
+        stmt = select(func.count(Lead.id)).where(
+            or_(Lead.created_by_user_id == user_id, Lead.referred_by_user_id == user_id)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one() or 0
+
+    async def delete(self, user: User) -> None:
+        await self.session.delete(user)
+        await self.session.flush()
+
 

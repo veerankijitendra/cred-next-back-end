@@ -13,6 +13,9 @@ from app.schemas.admin_user import (
     AdminUserListQuery,
     AdminUserListResponse,
     CreateAdminUserRequest,
+    UpdateUserRoleRequest,
+    UpdateAdminUserRequest,
+    VerifyAdminUserRequest,
 )
 from app.services.admin_user import AdminUserService
 from app.services.auth import AuthService
@@ -153,19 +156,52 @@ class AdminUsersTests(unittest.TestCase):
             reference_id="CNX-REF-ADM01",
             role=UserRoleEnum.ADMIN,
         )
-        fake_repo = _FakeAdminUserRepository(users=[admin_actor])
+        super_actor = User(
+            id=uuid4(),
+            name="Super Admin",
+            email="super@example.com",
+            phone_number="9999999999",
+            reference_id="CNX-REF-SUPER",
+            role=UserRoleEnum.SUPER_ADMIN,
+        )
+        fake_repo = _FakeAdminUserRepository(users=[admin_actor, super_actor])
         service = AdminUserService(session=_FakeSession(), repository=fake_repo)
 
-        # Regular Admin attempting to create SUPER_ADMIN must be blocked with ForbiddenError
-        req = CreateAdminUserRequest(
+        # 1. Pydantic schema validation rejects SUPER_ADMIN on creation
+        with self.assertRaises(ValidationError) as ctx:
+            CreateAdminUserRequest(
+                name="Sneaky Admin",
+                email="sneaky@crednexa.com",
+                phone_number="9889810021",
+                role=UserRoleEnum.SUPER_ADMIN,
+                account_status="active",
+            )
+        self.assertIn("Super Admin role cannot be created or assigned via the API", str(ctx.exception))
+
+        # 2. Pydantic schema validation rejects SUPER_ADMIN on role update
+        with self.assertRaises(ValidationError) as ctx:
+            UpdateUserRoleRequest(role=UserRoleEnum.SUPER_ADMIN)
+        self.assertIn("Users cannot be promoted to Super Admin via the API", str(ctx.exception))
+
+        # 3. Service layer rejects SUPER_ADMIN creation even if schema is bypassed, for any actor
+        constructed_req = CreateAdminUserRequest.model_construct(
             name="Sneaky Admin",
             email="sneaky@crednexa.com",
             phone_number="9889810021",
             role=UserRoleEnum.SUPER_ADMIN,
             account_status="active",
+            title=None,
+            temporary_password=None,
         )
-        with self.assertRaises(ForbiddenError):
-            run_coroutine(service.create_user(payload=req, actor=admin_actor))
+        # Even Super Admin cannot create a Super Admin via service/API
+        with self.assertRaises(ForbiddenError) as ctx:
+            run_coroutine(service.create_user(payload=constructed_req, actor=super_actor))
+        self.assertIn("Super Administrator accounts cannot be created via the API", str(ctx.exception))
+
+        # Regular Admin also cannot create a Super Admin via service/API
+        with self.assertRaises(ForbiddenError) as ctx:
+            run_coroutine(service.create_user(payload=constructed_req, actor=admin_actor))
+        self.assertIn("Super Administrator accounts cannot be created via the API", str(ctx.exception))
 
     def test_create_user_with_explicit_temporary_password(self):
         actor = User(
@@ -257,6 +293,7 @@ class AdminUsersTests(unittest.TestCase):
             phone_number="9999999998",
             reference_id="CNX-REF-TARGET",
             role=UserRoleEnum.USER,
+            is_verified=True,
             is_active=True,
         )
         fake_repo = _FakeAdminUserRepository(users=[super_actor, regular_admin, target_user])
@@ -277,10 +314,21 @@ class AdminUsersTests(unittest.TestCase):
             run_coroutine(
                 service.update_user_role(
                     identifier=str(target_user.id),
-                    new_role=UserRoleEnum.SUPER_ADMIN,
+                    new_role=UserRoleEnum.ADMIN,
                     actor=regular_admin,
                 )
             )
+
+        # Super Admin cannot promote user to SUPER_ADMIN via API
+        with self.assertRaises(ForbiddenError) as ctx:
+            run_coroutine(
+                service.update_user_role(
+                    identifier=str(target_user.id),
+                    new_role=UserRoleEnum.SUPER_ADMIN,
+                    actor=super_actor,
+                )
+            )
+        self.assertIn("Users cannot be promoted to Super Administrator via the API", str(ctx.exception))
 
         # Cannot demote sole remaining Super Admin
         with self.assertRaises(ConflictError):
@@ -364,6 +412,102 @@ class AdminUsersTests(unittest.TestCase):
             run_coroutine(
                 auth_service.login_user(email="inactive@example.com", password=password)
             )
+
+    def test_verify_user_by_super_admin(self):
+        super_admin = User(
+            id=uuid4(),
+            name="Super Admin",
+            email="superadmin@example.com",
+            phone_number="9999999990",
+            reference_id="CNX-REF-SA",
+            role=UserRoleEnum.SUPER_ADMIN,
+        )
+        regular_admin = User(
+            id=uuid4(),
+            name="Regular Admin",
+            email="admin@example.com",
+            phone_number="9999999991",
+            reference_id="CNX-REF-ADM",
+            role=UserRoleEnum.ADMIN,
+        )
+        target = User(
+            id=uuid4(),
+            name="Target User",
+            email="target@example.com",
+            phone_number="9999999992",
+            reference_id="CNX-REF-TARGET",
+            role=UserRoleEnum.USER,
+            is_verified=False,
+            is_active=False,
+        )
+        session = _FakeSession()
+        fake_repo = _FakeAdminUserRepository(users=[super_admin, regular_admin, target])
+        service = AdminUserService(session=session, repository=fake_repo)
+
+        # Regular Admin cannot verify accounts
+        with self.assertRaises(ForbiddenError):
+            run_coroutine(
+                service.verify_user(identifier=str(target.id), is_verified=True, actor=regular_admin)
+            )
+
+        # Super Admin successfully verifies account
+        res = run_coroutine(
+            service.verify_user(identifier=str(target.id), is_verified=True, actor=super_admin)
+        )
+        self.assertEqual(res.verification_status, "verified")
+        self.assertTrue(target.is_verified)
+        self.assertTrue(target.is_active)
+        self.assertEqual(res.account_status, "active")
+        self.assertEqual(target.updated_by_user_id, super_admin.id)
+        self.assertEqual(target.updated_by_name, super_admin.name)
+
+    def test_unverified_user_role_update_restricted(self):
+        super_admin = User(
+            id=uuid4(),
+            name="Super Admin",
+            email="superadmin@example.com",
+            phone_number="9999999990",
+            reference_id="CNX-REF-SA",
+            role=UserRoleEnum.SUPER_ADMIN,
+        )
+        target = User(
+            id=uuid4(),
+            name="Unverified User",
+            email="unverified@example.com",
+            phone_number="9999999993",
+            reference_id="CNX-REF-UNV",
+            role=UserRoleEnum.USER,
+            is_verified=False,
+            is_active=False,
+        )
+        session = _FakeSession()
+        fake_repo = _FakeAdminUserRepository(users=[super_admin, target])
+        service = AdminUserService(session=session, repository=fake_repo)
+
+        # Attempting role change while unverified raises ConflictError
+        with self.assertRaises(ConflictError):
+            run_coroutine(
+                service.update_user(
+                    identifier=str(target.id),
+                    payload=UpdateAdminUserRequest(role=UserRoleEnum.ADMIN),
+                    actor=super_admin,
+                )
+            )
+
+        # Providing is_verified=True in the same update unlocks the role change
+        res = run_coroutine(
+            service.update_user(
+                identifier=str(target.id),
+                payload=UpdateAdminUserRequest(role=UserRoleEnum.ADMIN, is_verified=True),
+                actor=super_admin,
+            )
+        )
+        self.assertEqual(res.role, UserRoleEnum.ADMIN)
+        self.assertEqual(res.verification_status, "verified")
+        self.assertTrue(target.is_verified)
+        self.assertTrue(target.is_active)
+        self.assertEqual(res.account_status, "active")
+        self.assertEqual(target.role, UserRoleEnum.ADMIN)
 
 
 class _FakeSession:

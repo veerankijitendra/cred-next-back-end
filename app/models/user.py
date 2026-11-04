@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import Boolean, Enum, String
+from sqlalchemy import Boolean, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -25,6 +25,8 @@ class User(BaseModelMixin, Base):
         is_verified: bool = False,
         is_active: bool = True,
         title: str | None = None,
+        updated_by_user_id: UUID | None = None,
+        updated_by_name: str | None = None,
     ):
         self.id = id
         self.reference_id = reference_id
@@ -37,6 +39,8 @@ class User(BaseModelMixin, Base):
         self.is_verified = is_verified
         self.is_active = is_active
         self.title = title
+        self.updated_by_user_id = updated_by_user_id
+        self.updated_by_name = updated_by_name
 
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     email: Mapped[str] = mapped_column(
@@ -65,3 +69,14 @@ class User(BaseModelMixin, Base):
     title: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
 
     reference_id: Mapped[str] = mapped_column(String(45), unique=True, nullable=False)
+
+    updated_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+    )
+    updated_by_name: Mapped[str | None] = mapped_column(
+        String(150),
+        nullable=True,
+        default=None,
+    )

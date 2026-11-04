@@ -21,6 +21,7 @@ from app.schemas.admin_user import (
     AdminUserListResponse,
     AdminUserStats,
     CreateAdminUserRequest,
+    UpdateAdminUserRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,9 @@ class AdminUserService:
             verification_status="verified" if user.is_verified else "unverified",
             account_status="active" if user.is_active else "inactive",
             created_at=user.created_at or datetime.now(UTC),
+            updated_at=user.updated_at,
+            updated_by_id=user.updated_by_user_id,
+            updated_by_name=user.updated_by_name,
             reference_id=user.reference_id,
             avatar_initials=self._get_initials(user.name),
             assigned_leads_count=assigned_leads_count,
@@ -108,9 +112,11 @@ class AdminUserService:
         payload: CreateAdminUserRequest,
         actor: User,
     ) -> AdminUserCreatedResponse:
-        # Privilege Escalation Guard: Only SUPER_ADMIN can create another SUPER_ADMIN
-        if payload.role == UserRoleEnum.SUPER_ADMIN and actor.role != UserRoleEnum.SUPER_ADMIN:
-            raise ForbiddenError(message="Only super administrators can create or assign super admin roles.")
+        # Security Policy: Super Admin accounts can ONLY be provisioned via server CLI scripts, NEVER via API/Postman/Browser
+        if payload.role == UserRoleEnum.SUPER_ADMIN:
+            raise ForbiddenError(
+                message="Super Administrator accounts cannot be created via the API or browser. Use the server CLI bootstrap script."
+            )
 
         existing_email = await self.repository.get_by_email(payload.email)
         if existing_email:
@@ -180,6 +186,10 @@ class AdminUserService:
 
         new_status = not user.is_active
 
+        # Prevent deactivating own account
+        if user.id == actor.id and not new_status:
+            raise ConflictError("You cannot deactivate your own account.")
+
         # Last Super Admin Safeguard: Cannot deactivate the sole remaining active Super Admin
         if user.role == UserRoleEnum.SUPER_ADMIN and user.is_active and not new_status:
             active_super_admins = await self.repository.count_active_super_admins()
@@ -187,6 +197,9 @@ class AdminUserService:
                 raise ConflictError("Cannot deactivate the sole remaining active Super Admin.")
 
         user.is_active = new_status
+        user.updated_by_user_id = actor.id
+        user.updated_by_name = actor.name
+        user.updated_at = datetime.now(UTC)
 
         # If deactivated, revoke active sessions immediately
         if not new_status:
@@ -200,14 +213,13 @@ class AdminUserService:
         try:
             await self.session.commit()
             await self.session.refresh(user)
-
             logger.info(
-                "Admin user status updated",
+                "User account status toggled",
                 extra={
                     "event": "admin.user_status_toggled",
                     "actor_user_id": str(actor.id),
                     "target_user_id": str(user.id),
-                    "new_status": "active" if user.is_active else "inactive",
+                    "new_status": "active" if new_status else "inactive",
                 },
             )
             return self._to_item_response(user)
@@ -225,9 +237,21 @@ class AdminUserService:
         if actor.role != UserRoleEnum.SUPER_ADMIN:
             raise ForbiddenError(message="Only super administrators can change user roles.")
 
+        # Security Policy: Users cannot be elevated to Super Admin via API
+        if new_role == UserRoleEnum.SUPER_ADMIN:
+            raise ForbiddenError(
+                message="Users cannot be promoted to Super Administrator via the API or browser. Role elevation to Super Admin must be executed via server CLI scripts."
+            )
+
         user = await self.repository.get_by_id_or_ref(identifier)
         if user is None:
             raise NotFoundError("User was not found.")
+
+        # Guard: Account must be verified before role can be updated
+        if not user.is_verified and new_role != user.role:
+            raise ConflictError(
+                "Cannot update role for an unverified account. The user must complete email and phone verification first."
+            )
 
         if user.role == UserRoleEnum.SUPER_ADMIN and new_role != UserRoleEnum.SUPER_ADMIN:
             active_super_admins = await self.repository.count_active_super_admins()
@@ -235,6 +259,9 @@ class AdminUserService:
                 raise ConflictError("Cannot demote the sole remaining active Super Admin.")
 
         user.role = new_role
+        user.updated_by_user_id = actor.id
+        user.updated_by_name = actor.name
+        user.updated_at = datetime.now(UTC)
         try:
             await self.repository.update_role(user, new_role)
             await self.session.commit()
@@ -249,6 +276,188 @@ class AdminUserService:
                 },
             )
             return self._to_item_response(user)
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    async def update_user(
+        self,
+        *,
+        identifier: str,
+        payload: UpdateAdminUserRequest,
+        actor: User,
+    ) -> AdminUserItemResponse:
+        if actor.role != UserRoleEnum.SUPER_ADMIN:
+            raise ForbiddenError(message="Only super administrators can modify user profiles.")
+
+        user = await self.repository.get_by_id_or_ref(identifier)
+        if user is None:
+            raise NotFoundError("User was not found.")
+
+        # Email update validation
+        if payload.email is not None and payload.email.strip().lower() != user.email.lower():
+            existing_email = await self.repository.get_by_email(payload.email.strip().lower())
+            if existing_email and existing_email.id != user.id:
+                raise ConflictError("Email is already registered to another user.")
+            user.email = payload.email.strip().lower()
+
+        # Phone update validation
+        if payload.phone_number is not None and payload.phone_number.strip() != user.phone_number:
+            existing_phone = await self.repository.get_by_phone(payload.phone_number.strip())
+            if existing_phone and existing_phone.id != user.id:
+                raise ConflictError("Phone number is already registered to another user.")
+            user.phone_number = payload.phone_number.strip()
+
+        # Name
+        if payload.name is not None and payload.name.strip():
+            user.name = payload.name.strip()
+
+        # Title
+        if payload.title is not None:
+            user.title = payload.title.strip() if payload.title.strip() else None
+
+        # Verification status change (processed before role check so Super Admin can verify & elevate in one operation)
+        if payload.is_verified is not None:
+            user.is_verified = payload.is_verified
+            if payload.is_verified and payload.account_status is None and not user.is_active:
+                user.is_active = True
+
+        # Role change
+        if payload.role is not None and payload.role != user.role:
+            # Guard: Account must be verified before role can be updated
+            if not user.is_verified:
+                raise ConflictError(
+                    "Cannot update role for an unverified account. The user must complete email and phone verification first."
+                )
+            if payload.role == UserRoleEnum.SUPER_ADMIN:
+                raise ForbiddenError("Cannot promote user to Super Admin via the API.")
+            if user.role == UserRoleEnum.SUPER_ADMIN and payload.role != UserRoleEnum.SUPER_ADMIN:
+                active_super_admins = await self.repository.count_active_super_admins()
+                if active_super_admins <= 1:
+                    raise ConflictError("Cannot demote the sole remaining active Super Admin.")
+            user.role = payload.role
+
+        # Account status change
+        if payload.account_status is not None:
+            new_is_active = (payload.account_status == "active")
+            if new_is_active != user.is_active:
+                if user.id == actor.id and not new_is_active:
+                    raise ConflictError("You cannot deactivate your own account.")
+                if user.role == UserRoleEnum.SUPER_ADMIN and user.is_active and not new_is_active:
+                    active_super_admins = await self.repository.count_active_super_admins()
+                    if active_super_admins <= 1:
+                        raise ConflictError("Cannot deactivate the sole remaining active Super Admin.")
+                user.is_active = new_is_active
+                if not new_is_active:
+                    now = datetime.now(UTC)
+                    await self.session.execute(
+                        update(RefreshSession)
+                        .where(RefreshSession.user_id == user.id, RefreshSession.revoked_at.is_(None))
+                        .values(revoked_at=now)
+                    )
+
+        # Audit tracking
+        user.updated_by_user_id = actor.id
+        user.updated_by_name = actor.name
+        user.updated_at = datetime.now(UTC)
+
+        try:
+            await self.session.commit()
+            await self.session.refresh(user)
+            logger.info(
+                "User profile updated by super admin",
+                extra={
+                    "event": "admin.user_updated",
+                    "actor_user_id": str(actor.id),
+                    "target_user_id": str(user.id),
+                },
+            )
+            return self._to_item_response(user)
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    async def verify_user(
+        self,
+        *,
+        identifier: str,
+        is_verified: bool,
+        actor: User,
+    ) -> AdminUserItemResponse:
+        if actor.role != UserRoleEnum.SUPER_ADMIN:
+            raise ForbiddenError(message="Only super administrators can manually alter verification status.")
+
+        user = await self.repository.get_by_id_or_ref(identifier)
+        if user is None:
+            raise NotFoundError("User was not found.")
+
+        user.is_verified = is_verified
+        if is_verified:
+            user.is_active = True
+        else:
+            user.is_active = False
+        user.updated_by_user_id = actor.id
+        user.updated_by_name = actor.name
+        user.updated_at = datetime.now(UTC)
+
+        try:
+            await self.session.commit()
+            await self.session.refresh(user)
+            logger.info(
+                "User account verification toggled by super admin",
+                extra={
+                    "event": "admin.user_verified",
+                    "actor_user_id": str(actor.id),
+                    "target_user_id": str(user.id),
+                    "is_verified": is_verified,
+                },
+            )
+            return self._to_item_response(user)
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    async def delete_user(
+        self,
+        *,
+        identifier: str,
+        actor: User,
+    ) -> None:
+        if actor.role != UserRoleEnum.SUPER_ADMIN:
+            raise ForbiddenError(message="Only super administrators can delete user accounts.")
+
+        user = await self.repository.get_by_id_or_ref(identifier)
+        if user is None:
+            raise NotFoundError("User was not found.")
+
+        # Self-deletion safeguard
+        if user.id == actor.id:
+            raise ConflictError("You cannot delete your own account.")
+
+        # Last Super Admin safeguard
+        if user.role == UserRoleEnum.SUPER_ADMIN:
+            active_super_admins = await self.repository.count_active_super_admins()
+            if active_super_admins <= 1:
+                raise ConflictError("Cannot delete the sole remaining active Super Admin.")
+
+        # Integrity check: loan leads ownership
+        leads_count = await self.repository.count_user_leads(user.id)
+        if leads_count > 0:
+            raise ConflictError(
+                f"Cannot delete user with {leads_count} associated loan leads. Please deactivate the user or reassign leads before deletion."
+            )
+
+        try:
+            await self.repository.delete(user)
+            await self.session.commit()
+            logger.info(
+                "User permanently deleted",
+                extra={
+                    "event": "admin.user_deleted",
+                    "actor_user_id": str(actor.id),
+                    "deleted_user_id": str(user.id),
+                },
+            )
         except Exception:
             await self.session.rollback()
             raise

@@ -27,6 +27,9 @@ class JsonFormatter(logging.Formatter):
         "new_status",
         "channel",
         "validation_fields",
+        "db_error",
+        "db_pgcode",
+        "db_statement",
     )
 
     def format(self, record: logging.LogRecord) -> str:

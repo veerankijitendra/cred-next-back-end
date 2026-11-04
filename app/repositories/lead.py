@@ -28,7 +28,10 @@ class LeadRepository:
     ) -> Lead | None:
         statement = select(Lead).where(
             Lead.lead_id == lead_id,
-            Lead.created_by_user_id == user_id,
+            or_(
+                Lead.created_by_user_id == user_id,
+                Lead.referred_by_user_id == user_id,
+            ),
         )
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
@@ -194,3 +197,29 @@ class LeadRepository:
         leads = list(result.scalars().all())
 
         return leads, total
+
+    async def get_admin_lead_stats(self) -> dict[str, int]:
+        statement = select(Lead.status, func.count(Lead.id)).group_by(Lead.status)
+        result = await self.session.execute(statement)
+        counts = {row[0]: row[1] for row in result.all()}
+
+        total_statement = select(func.count(Lead.id))
+        total_result = await self.session.execute(total_statement)
+        total = total_result.scalar_one()
+
+        submitted = counts.get(LeadStatus.LEAD_SUBMITTED, 0)
+        evaluation = counts.get(LeadStatus.CUSTOMER_EVALUATION, 0)
+        documents = counts.get(LeadStatus.DOCUMENTS, 0)
+        bank_process = counts.get(LeadStatus.BANK_PROCESS, 0)
+        underwriting = documents + bank_process
+        disbursed = counts.get(LeadStatus.DISBURSED, 0)
+        rejected = counts.get(LeadStatus.REJECTED, 0)
+
+        return {
+            "total": total,
+            "submitted": submitted,
+            "evaluation": evaluation,
+            "underwriting": underwriting,
+            "disbursed": disbursed,
+            "rejected": rejected,
+        }

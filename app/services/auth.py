@@ -108,6 +108,8 @@ class AuthService:
                 email=data.email,
                 phone_number=data.phone_number,
                 password_hash=password_hash,
+                is_verified=False,
+                is_active=False,
             )
             is_resume = False
 

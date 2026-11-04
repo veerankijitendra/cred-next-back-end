@@ -9,6 +9,8 @@ from uuid import uuid4
 # Ensure parent directory is in sys.path so app modules can be imported
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import app  # Configures WindowsSelectorEventLoopPolicy and DNS fallback on Windows
+
 from sqlalchemy import select
 from app.core.reference_id import generate_reference_id
 from app.core.security import hash_password

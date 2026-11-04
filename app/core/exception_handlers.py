@@ -86,6 +86,14 @@ async def sqlalchemy_exception_handler(
     request: Request,
     exc: SQLAlchemyError,
 ) -> JSONResponse:
+    orig = getattr(exc, "orig", None)
+    pgcode = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+    db_error = str(orig).strip() if orig is not None else str(exc).strip()
+
+    # Capture parameterized SQL template where safe (never exposing bind parameter values)
+    raw_statement = getattr(exc, "statement", None)
+    safe_statement = " ".join(raw_statement.split()) if isinstance(raw_statement, str) else None
+
     logger.error(
         "Database request failed",
         extra={
@@ -95,6 +103,9 @@ async def sqlalchemy_exception_handler(
             "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
             "error_code": "DATABASE_ERROR",
             "exception_type": type(exc).__name__,
+            "db_error": db_error,
+            "db_pgcode": str(pgcode) if pgcode else None,
+            "db_statement": safe_statement,
         },
     )
 

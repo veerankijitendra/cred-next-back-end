@@ -10,12 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.constants import ApplicationType, LeadStatus, LoanType
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.core.lead_id import generate_lead_id
+from app.enums.user import UserRoleEnum
 from app.models.lead import Lead
 from app.models.lead_status_history import LeadStatusHistory
 from app.models.user import User
 from app.repositories.lead import LeadRepository
 from app.repositories.lead_status_history import LeadStatusHistoryRepository
-from app.schemas.admin_lead import AdminLeadItemResponse, AdminLeadListResponse, LeadUserInfo
+from app.schemas.admin_lead import (
+    AdminLeadItemResponse,
+    AdminLeadListResponse,
+    AdminLeadStats,
+    LeadUserInfo,
+)
 from app.schemas.lead import (
     LeadListItemResponse,
     LeadListResponse,
@@ -153,9 +159,13 @@ class LeadService:
     async def get_user_lead_status_board(
         self, *, lead_id: str, user: User
     ) -> LeadStatusBoardResponse:
-        lead = await self.lead_repository.get_user_lead_by_lead_id(
-            lead_id=lead_id, user_id=user.id
-        )
+        if user.role in (UserRoleEnum.ADMIN, UserRoleEnum.SUPER_ADMIN):
+            lead = await self.lead_repository.get_by_lead_id(lead_id=lead_id)
+        else:
+            lead = await self.lead_repository.get_user_lead_by_lead_id(
+                lead_id=lead_id, user_id=user.id
+            )
+
         if lead is None:
             raise NotFoundError("Lead was not found.")
 
@@ -312,6 +322,8 @@ class LeadService:
             for lead in leads
         ]
 
+        stats_dict = await self.lead_repository.get_admin_lead_stats()
+
         return AdminLeadListResponse(
             items=items,
             page=page,
@@ -320,4 +332,50 @@ class LeadService:
             total_pages=total_pages,
             has_next=page < total_pages,
             has_previous=page > 1,
+            stats=AdminLeadStats.model_validate(stats_dict),
+        )
+
+    async def admin_update_lead_status(
+        self,
+        *,
+        lead_id: str,
+        new_status: LeadStatus,
+        actor: User,
+        reason: str | None = None,
+    ) -> AdminLeadItemResponse:
+        lead = await self.lead_repository.get_by_lead_id(lead_id=lead_id)
+        if lead is None:
+            raise NotFoundError("Lead was not found.")
+
+        updated_lead = await self.update_lead_status(
+            lead=lead,
+            new_status=new_status,
+            changed_by_user=actor,
+            reason=reason,
+        )
+
+        loaded_lead = await self.lead_repository.get_by_id(updated_lead.id)
+        if loaded_lead:
+            await self.session.refresh(loaded_lead, ["created_by", "referred_by"])
+            lead_to_return = loaded_lead
+        else:
+            lead_to_return = updated_lead
+
+        return AdminLeadItemResponse(
+            id=lead_to_return.id,
+            lead_id=lead_to_return.lead_id,
+            application_type=lead_to_return.application_type,
+            loan_type=lead_to_return.loan_type,
+            full_name=lead_to_return.full_name,
+            contact_number=lead_to_return.contact_number,
+            email=lead_to_return.email,
+            city=lead_to_return.city,
+            loan_amount=lead_to_return.loan_amount,
+            monthly_income=lead_to_return.monthly_income,
+            credit_score=lead_to_return.credit_score,
+            status=lead_to_return.status,
+            created_by=LeadUserInfo.model_validate(lead_to_return.created_by),
+            referred_by=LeadUserInfo.model_validate(lead_to_return.referred_by) if lead_to_return.referred_by else None,
+            created_at=lead_to_return.created_at,
+            updated_at=lead_to_return.updated_at,
         )

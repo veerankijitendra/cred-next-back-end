@@ -54,6 +54,20 @@ class AdminLeadItemResponse(BaseModel):
     updated_at: datetime
 
 
+class AdminLeadStats(BaseModel):
+    total: int = 0
+    submitted: int = 0
+    evaluation: int = 0
+    underwriting: int = 0
+    disbursed: int = 0
+    rejected: int = 0
+
+
+class AdminUpdateLeadStatusRequest(BaseModel):
+    status: LeadStatus
+    reason: str | None = Field(default=None, max_length=255)
+
+
 class AdminLeadListResponse(BaseModel):
     items: list[AdminLeadItemResponse]
     page: int
@@ -62,4 +76,5 @@ class AdminLeadListResponse(BaseModel):
     total_pages: int
     has_next: bool
     has_previous: bool
+    stats: AdminLeadStats | None = None
 

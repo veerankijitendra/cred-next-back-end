@@ -6,7 +6,12 @@ from app.db.session import get_db
 from app.models.user import User
 from app.repositories.lead import LeadRepository
 from app.repositories.lead_status_history import LeadStatusHistoryRepository
-from app.schemas.admin_lead import AdminLeadListQuery, AdminLeadListResponse
+from app.schemas.admin_lead import (
+    AdminLeadItemResponse,
+    AdminLeadListQuery,
+    AdminLeadListResponse,
+    AdminUpdateLeadStatusRequest,
+)
 from app.services.lead import LeadService
 
 router = APIRouter(prefix="/admin/leads", tags=["Admin - Leads"])
@@ -38,5 +43,24 @@ async def get_admin_leads(
         loan_type=query.loan_type,
         start_date=query.start_date,
         end_date=query.end_date,
+    )
+
+
+@router.patch("/{lead_id}/status", response_model=AdminLeadItemResponse)
+async def update_admin_lead_status(
+    lead_id: str,
+    payload: AdminUpdateLeadStatusRequest,
+    current_admin: User = Depends(require_admin),
+    service: LeadService = Depends(get_lead_service),
+) -> AdminLeadItemResponse:
+    """
+    Update lead lifecycle status and log status history.
+    Accessible only by administrators.
+    """
+    return await service.admin_update_lead_status(
+        lead_id=lead_id,
+        new_status=payload.status,
+        actor=current_admin,
+        reason=payload.reason,
     )
 

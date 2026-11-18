@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 import math
 import logging
 import re
@@ -32,6 +32,7 @@ from app.schemas.lead import (
     LeadStatusHistoryItem,
     LeadStatusItem,
 )
+from app.services.bonus import BonusService
 
 STATUS_STAGES = (
     (LeadStatus.LEAD_SUBMITTED, "Lead Submitted"),
@@ -175,7 +176,13 @@ class LeadService:
             total_pages=total_pages,
             has_next=page < total_pages,
             has_previous=page > 1,
-            items=[LeadListItemResponse.model_validate(lead) for lead in leads],
+            items=[
+                LeadListItemResponse(
+                    **LeadListItemResponse.model_validate(lead).model_dump(exclude={"bonus"}),
+                    bonus=BonusService.calculate_lead_bonus(lead=lead) if lead.status == LeadStatus.DISBURSED else None,
+                )
+                for lead in leads
+            ],
         )
 
     async def get_user_lead_status_board(
@@ -237,12 +244,20 @@ class LeadService:
             for i, (stage, label) in enumerate(STATUS_STAGES)
         ]
 
+        bonus_data = None
+        if lead.status == LeadStatus.DISBURSED:
+            bonus_data = BonusService.calculate_lead_bonus(lead=lead)
+
+        lead_dict = LeadResponse.model_validate(lead).model_dump(exclude={"bonus"})
+        lead_response = LeadResponse(**lead_dict, bonus=bonus_data)
+
         return LeadStatusBoardResponse(
-            lead=LeadResponse.model_validate(lead),
+            lead=lead_response,
             current_status=lead.status,
             status_board=status_board,
             outcome=LeadStatus.REJECTED if lead.status == LeadStatus.REJECTED else None,
             history=history,
+            bonus=bonus_data,
             updated_at=lead.updated_at,
         )
 
@@ -271,6 +286,8 @@ class LeadService:
         try:
             # 1.Update the current status
             lead.status = new_status
+            if new_status == LeadStatus.DISBURSED and not lead.disbursed_at:
+                lead.disbursed_at = datetime.now(UTC)
 
             await self.lead_repository.update_status(lead=lead, status=new_status)
 
@@ -338,6 +355,8 @@ class LeadService:
                 status=lead.status,
                 created_by=LeadUserInfo.model_validate(lead.created_by),
                 referred_by=LeadUserInfo.model_validate(lead.referred_by) if lead.referred_by else None,
+                disbursed_at=lead.disbursed_at,
+                bonus=BonusService.calculate_lead_bonus(lead=lead) if lead.status == LeadStatus.DISBURSED else None,
                 created_at=lead.created_at,
                 updated_at=lead.updated_at,
             )
@@ -383,6 +402,10 @@ class LeadService:
         else:
             lead_to_return = updated_lead
 
+        bonus_calc = None
+        if lead_to_return.status == LeadStatus.DISBURSED:
+            bonus_calc = BonusService.calculate_lead_bonus(lead=lead_to_return)
+
         return AdminLeadItemResponse(
             id=lead_to_return.id,
             lead_id=lead_to_return.lead_id,
@@ -398,6 +421,8 @@ class LeadService:
             status=lead_to_return.status,
             created_by=LeadUserInfo.model_validate(lead_to_return.created_by),
             referred_by=LeadUserInfo.model_validate(lead_to_return.referred_by) if lead_to_return.referred_by else None,
+            disbursed_at=lead_to_return.disbursed_at,
+            bonus=bonus_calc,
             created_at=lead_to_return.created_at,
             updated_at=lead_to_return.updated_at,
         )

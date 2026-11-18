@@ -13,6 +13,7 @@ from app.schemas.lead import (
     LeadListResponse,
     ReferralResponse,
 )
+from app.services.bonus import BonusService
 
 
 class DashboardService:
@@ -56,6 +57,13 @@ class DashboardService:
             f"{urlencode({'ref': current_user.reference_id})}"
         )
 
+        items = []
+        for lead in leads:
+            item = LeadListItemResponse.model_validate(lead)
+            if lead.status == LeadStatus.DISBURSED:
+                item.bonus = BonusService.calculate_lead_bonus(lead=lead)
+            items.append(item)
+
         return DashboardResponse(
             summary=DashboardSummaryResponse(
                 bank_process=summary.get("bank_process", 0),
@@ -71,7 +79,7 @@ class DashboardService:
                 referral_link=referral_link,
             ),
             leads=LeadListResponse(
-                items=[LeadListItemResponse.model_validate(lead) for lead in leads],
+                items=items,
                 page=page,
                 page_size=page_size,
                 total=total,

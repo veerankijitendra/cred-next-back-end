@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.constants import ApplicationType, LeadStatus, LoanType
+from app.schemas.bonus import BonusBreakdownResponse
 
 
 class AdminLeadListQuery(BaseModel):
@@ -50,6 +51,8 @@ class AdminLeadItemResponse(BaseModel):
     status: LeadStatus
     created_by: LeadUserInfo
     referred_by: LeadUserInfo | None = None
+    disbursed_at: datetime | None = None
+    bonus: BonusBreakdownResponse | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -77,4 +80,3 @@ class AdminLeadListResponse(BaseModel):
     has_next: bool
     has_previous: bool
     stats: AdminLeadStats | None = None
-

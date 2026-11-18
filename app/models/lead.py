@@ -1,7 +1,8 @@
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import ApplicationType, LeadStatus, LoanType
@@ -30,6 +31,7 @@ class Lead(Base, BaseModelMixin):
         monthly_income: Decimal,
         credit_score: int | None = None,
         status: LeadStatus = LeadStatus.LEAD_SUBMITTED,
+        disbursed_at: datetime | None = None,
     ):
         self.id = id
         self.lead_id = lead_id
@@ -45,6 +47,7 @@ class Lead(Base, BaseModelMixin):
         self.monthly_income = monthly_income
         self.credit_score = credit_score
         self.status = status
+        self.disbursed_at = disbursed_at
 
     def __repr__(self):
         return f"<Lead(id={self.id})>"
@@ -91,6 +94,10 @@ class Lead(Base, BaseModelMixin):
         String(100),
         nullable=False,
         default=LeadStatus.LEAD_SUBMITTED,
+    )
+
+    disbursed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
     )
 
     created_by: Mapped[User] = relationship("User", foreign_keys=[created_by_user_id])

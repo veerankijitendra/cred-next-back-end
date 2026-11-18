@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 from datetime import datetime
 from decimal import Decimal
@@ -13,6 +15,7 @@ from pydantic import (
 )
 
 from app.core.constants import ApplicationType, LeadStatus, LoanType
+from app.schemas.bonus import BonusBreakdownResponse
 
 
 class LeadRequest(BaseModel):
@@ -119,32 +122,6 @@ class LeadRequest(BaseModel):
 
         return value.strip().upper()
 
-    class LeadResponse(BaseModel):
-        model_config = ConfigDict(from_attributes=True)
-
-        id: UUID
-        lead_id: str
-
-        application_type: ApplicationType
-        loan_type: LoanType
-
-        full_name: str
-        contact_number: str
-        email: EmailStr
-        city: str
-
-        loan_amount: Decimal
-        monthly_income: Decimal
-        credit_score: int | None
-
-        status: LeadStatus
-
-        created_by_user_id: UUID
-        referred_by_user_id: UUID | None
-
-        created_at: datetime
-        updated_at: datetime
-
 
 class LeadStatusItem(BaseModel):
     status: LeadStatus
@@ -170,6 +147,8 @@ class LeadResponse(BaseModel):
     status: LeadStatus
     created_by_user_id: UUID
     referred_by_user_id: UUID | None
+    disbursed_at: datetime | None = None
+    bonus: BonusBreakdownResponse | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -187,6 +166,7 @@ class LeadStatusBoardResponse(BaseModel):
     status_board: list[LeadStatusItem]
     outcome: LeadStatus | None
     history: list[LeadStatusHistoryItem]
+    bonus: BonusBreakdownResponse | None = None
     updated_at: datetime
 
 
@@ -218,6 +198,8 @@ class LeadListItemResponse(BaseModel):
     city: str
     loan_amount: Decimal
     status: LeadStatus
+    disbursed_at: datetime | None = None
+    bonus: BonusBreakdownResponse | None = None
     created_at: datetime
 
 

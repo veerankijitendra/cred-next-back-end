@@ -203,6 +203,44 @@ class AdminUsersTests(unittest.TestCase):
             run_coroutine(service.create_user(payload=constructed_req, actor=admin_actor))
         self.assertIn("Super Administrator accounts cannot be created via the API", str(ctx.exception))
 
+        # 4. Regular Admin cannot create a Staff Admin account (restricted to Super Admin only)
+        admin_create_staff_req = CreateAdminUserRequest(
+            name="Sub Staff",
+            email="substaff@crednexa.com",
+            phone_number="9889810055",
+            role=UserRoleEnum.ADMIN,
+            account_status="active",
+        )
+        with self.assertRaises(ForbiddenError) as ctx:
+            run_coroutine(service.create_user(payload=admin_create_staff_req, actor=admin_actor))
+        self.assertIn("Only super administrators can create administrative staff accounts.", str(ctx.exception))
+
+        # 5. Regular Admin CAN create a normal borrower User account
+        admin_create_user_req = CreateAdminUserRequest(
+            name="New Borrower",
+            email="newborrower@crednexa.com",
+            phone_number="9889810056",
+            role=UserRoleEnum.USER,
+            account_status="active",
+        )
+        created_borrower = run_coroutine(service.create_user(payload=admin_create_user_req, actor=admin_actor))
+        self.assertEqual(created_borrower.role, UserRoleEnum.USER)
+        self.assertEqual(created_borrower.name, "New Borrower")
+        self.assertEqual(created_borrower.verification_status, "unverified")
+
+        # 6. Super Admin CAN create a Staff Admin account
+        super_create_staff_req = CreateAdminUserRequest(
+            name="Super Authorized Staff",
+            email="staffauth@crednexa.com",
+            phone_number="9889810057",
+            role=UserRoleEnum.ADMIN,
+            account_status="active",
+        )
+        created_staff = run_coroutine(service.create_user(payload=super_create_staff_req, actor=super_actor))
+        self.assertEqual(created_staff.role, UserRoleEnum.ADMIN)
+        self.assertEqual(created_staff.name, "Super Authorized Staff")
+        self.assertEqual(created_staff.verification_status, "verified")
+
     def test_create_user_with_explicit_temporary_password(self):
         actor = User(
             id=uuid4(),

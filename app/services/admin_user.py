@@ -118,6 +118,12 @@ class AdminUserService:
                 message="Super Administrator accounts cannot be created via the API or browser. Use the server CLI bootstrap script."
             )
 
+        # Security Policy: Only super administrators can create administrative staff accounts
+        if payload.role == UserRoleEnum.ADMIN and actor.role != UserRoleEnum.SUPER_ADMIN:
+            raise ForbiddenError(
+                message="Only super administrators can create administrative staff accounts."
+            )
+
         existing_email = await self.repository.get_by_email(payload.email)
         if existing_email:
             raise ConflictError("Email is already registered.")

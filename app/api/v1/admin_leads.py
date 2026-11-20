@@ -62,5 +62,6 @@ async def update_admin_lead_status(
         new_status=payload.status,
         actor=current_admin,
         reason=payload.reason,
+        disbursed_amount=payload.disbursed_amount,
     )
 

@@ -69,6 +69,7 @@ class AdminLeadStats(BaseModel):
 class AdminUpdateLeadStatusRequest(BaseModel):
     status: LeadStatus
     reason: str | None = Field(default=None, max_length=255)
+    disbursed_amount: Decimal | None = Field(default=None, ge=1)
 
 
 class AdminLeadListResponse(BaseModel):

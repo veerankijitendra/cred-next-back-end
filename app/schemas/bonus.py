@@ -85,6 +85,8 @@ class WithdrawalItemResponse(BaseModel):
     cooling_period_end_date: datetime
     created_at: datetime
     transaction_reference: str | None = None
+    rejection_reason: str | None = None
+    processed_at: datetime | None = None
 
 
 class UserWithdrawalsSummaryResponse(BaseModel):

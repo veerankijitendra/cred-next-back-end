@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime
+from decimal import Decimal
 import math
 import logging
 import re
@@ -225,6 +226,9 @@ class LeadService:
                 (i for i, (stage, _) in enumerate(STATUS_STAGES) if stage == active_stage),
                 None,
             )
+            if active_index is None:
+                active_index = 0
+                active_stage = STATUS_STAGES[0][0]
         else:
             active_index = next(
                 (i for i, (stage, _) in enumerate(STATUS_STAGES) if stage == lead.status),
@@ -239,7 +243,11 @@ class LeadService:
                     lead.status == LeadStatus.DISBURSED
                     or (active_index is not None and i < active_index)
                 ),
-                current=(lead.status == stage),
+                current=(
+                    (stage == active_stage)
+                    if lead.status == LeadStatus.REJECTED
+                    else (lead.status == stage)
+                ),
             )
             for i, (stage, label) in enumerate(STATUS_STAGES)
         ]
@@ -268,7 +276,11 @@ class LeadService:
         new_status: LeadStatus,
         changed_by_user: User,
         reason: str | None = None,
+        disbursed_amount: Decimal | None = None,
     ) -> Lead:
+
+        if lead.status in (LeadStatus.DISBURSED, LeadStatus.REJECTED):
+            raise ConflictError(f"Lead has reached terminal state '{lead.status.value}' and cannot be updated.")
 
         if lead.status == new_status:
             raise ConflictError("Lead is already in this status")
@@ -284,10 +296,13 @@ class LeadService:
         )
 
         try:
-            # 1.Update the current status
+            # 1.Update the current status and disbursal details
             lead.status = new_status
-            if new_status == LeadStatus.DISBURSED and not lead.disbursed_at:
-                lead.disbursed_at = datetime.now(UTC)
+            if new_status == LeadStatus.DISBURSED:
+                if disbursed_amount is not None:
+                    lead.loan_amount = disbursed_amount
+                if not lead.disbursed_at:
+                    lead.disbursed_at = datetime.now(UTC)
 
             await self.lead_repository.update_status(lead=lead, status=new_status)
 
@@ -383,6 +398,7 @@ class LeadService:
         new_status: LeadStatus,
         actor: User,
         reason: str | None = None,
+        disbursed_amount: Decimal | None = None,
     ) -> AdminLeadItemResponse:
         lead = await self.lead_repository.get_by_lead_id(lead_id=lead_id)
         if lead is None:
@@ -393,6 +409,7 @@ class LeadService:
             new_status=new_status,
             changed_by_user=actor,
             reason=reason,
+            disbursed_amount=disbursed_amount,
         )
 
         loaded_lead = await self.lead_repository.get_by_id(updated_lead.id)

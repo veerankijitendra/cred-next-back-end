@@ -7,9 +7,10 @@ from pydantic import ValidationError
 
 from app.core.auth import require_admin
 from app.core.constants import ApplicationType, LeadStatus, LoanType
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.enums.user import UserRoleEnum
 from app.models.lead import Lead
+from app.models.lead_status_history import LeadStatusHistory
 from app.models.user import User
 from app.schemas.admin_lead import AdminLeadListQuery, AdminLeadListResponse
 from app.services.lead import LeadService
@@ -297,6 +298,88 @@ class AdminLeadsTests(unittest.TestCase):
         )
         self.assertEqual(super_admin_board.lead.lead_id, lead.lead_id)
 
+    def test_status_board_for_rejected_lead(self):
+        creator = User(
+            id=uuid4(),
+            name="Applicant",
+            email="applicant@example.com",
+            phone_number="9876543210",
+            reference_id="CNX-REF-APP",
+            role=UserRoleEnum.USER,
+        )
+        lead = Lead(
+            id=uuid4(),
+            lead_id="CNX-20261120-1D54A91F129B",
+            created_by_user_id=creator.id,
+            referred_by_user_id=None,
+            application_type=ApplicationType.SELF,
+            loan_type=LoanType.PERSONAL_LOAN,
+            full_name="APPLICANT USER",
+            email="applicant@example.com",
+            contact_number="9876543210",
+            city="Hyderabad",
+            loan_amount=Decimal("500000.00"),
+            monthly_income=Decimal("75000.00"),
+            credit_score=620,
+            status=LeadStatus.REJECTED,
+        )
+        lead.created_at = datetime.now(UTC)
+        lead.updated_at = datetime.now(UTC)
+
+        history_repo = _FakeHistoryRepository()
+        history_repo.items = [
+            LeadStatusHistory(
+                lead_id=lead.id,
+                changed_by_user_id=creator.id,
+                old_status=None,
+                new_status=LeadStatus.LEAD_SUBMITTED,
+                reason="Application submitted",
+            ),
+            LeadStatusHistory(
+                lead_id=lead.id,
+                changed_by_user_id=creator.id,
+                old_status=LeadStatus.LEAD_SUBMITTED,
+                new_status=LeadStatus.CUSTOMER_EVALUATION,
+                reason="Review started",
+            ),
+            LeadStatusHistory(
+                lead_id=lead.id,
+                changed_by_user_id=creator.id,
+                old_status=LeadStatus.CUSTOMER_EVALUATION,
+                new_status=LeadStatus.REJECTED,
+                reason="Credit score below criteria",
+            ),
+        ]
+        now = datetime.now(UTC)
+        for item in history_repo.items:
+            item.id = uuid4()
+            item.created_at = now
+
+        service = LeadService(
+            session=None,
+            lead_repository=_FakeLeadRepository([lead]),
+            lead_status_history_repository=history_repo,
+        )
+
+        board = run_coroutine(
+            service.get_user_lead_status_board(lead_id=lead.lead_id, user=creator)
+        )
+        self.assertEqual(board.outcome, LeadStatus.REJECTED)
+        self.assertEqual(board.current_status, LeadStatus.REJECTED)
+
+        # Stage 0: Lead Submitted -> Completed
+        self.assertTrue(board.status_board[0].completed)
+        self.assertFalse(board.status_board[0].current)
+
+        # Stage 1: Customer Evaluation -> Current (Declined here)
+        self.assertFalse(board.status_board[1].completed)
+        self.assertTrue(board.status_board[1].current)
+
+        # Stages 2, 3, 4: Downstream stages -> Not completed, not current
+        for stage in board.status_board[2:]:
+            self.assertFalse(stage.completed)
+            self.assertFalse(stage.current)
+
     def test_status_board_accessible_by_creator_and_referrer(self):
         creator_id = uuid4()
         referrer_id = uuid4()
@@ -393,6 +476,135 @@ class AdminLeadsTests(unittest.TestCase):
         with self.assertRaises(NotFoundError):
             run_coroutine(
                 service.get_user_lead_status_board(lead_id=lead.lead_id, user=unrelated_user)
+            )
+
+    def test_update_lead_status_to_disbursed_with_custom_amount(self):
+        lead = Lead(
+            id=uuid4(),
+            lead_id="CNX-20261118-DISB001",
+            created_by_user_id=uuid4(),
+            referred_by_user_id=None,
+            application_type=ApplicationType.SELF,
+            loan_type=LoanType.PERSONAL_LOAN,
+            full_name="DISBURSED USER",
+            email="disbursed@example.com",
+            contact_number="9876543220",
+            city="Mumbai",
+            loan_amount=Decimal("500000.00"),
+            monthly_income=Decimal("80000.00"),
+            credit_score=780,
+            status=LeadStatus.CUSTOMER_EVALUATION,
+        )
+        admin = User(
+            id=uuid4(),
+            name="Admin Staff",
+            email="admin@example.com",
+            phone_number="9876500001",
+            reference_id="CNX-REF-ADM",
+            role=UserRoleEnum.ADMIN,
+        )
+
+        service = LeadService(
+            session=_FakeSession(),
+            lead_repository=_FakeLeadRepository([lead]),
+            lead_status_history_repository=_FakeHistoryRepository(),
+        )
+
+        updated = run_coroutine(
+            service.update_lead_status(
+                lead=lead,
+                new_status=LeadStatus.DISBURSED,
+                changed_by_user=admin,
+                reason="Sanctioned at ₹4,50,000",
+                disbursed_amount=Decimal("450000.00"),
+            )
+        )
+
+        self.assertEqual(updated.status, LeadStatus.DISBURSED)
+        self.assertEqual(updated.loan_amount, Decimal("450000.00"))
+        self.assertIsNotNone(updated.disbursed_at)
+
+    def test_terminal_state_disbursed_lead_cannot_be_updated(self):
+        lead = Lead(
+            id=uuid4(),
+            lead_id="CNX-20261118-LOCKED1",
+            created_by_user_id=uuid4(),
+            referred_by_user_id=None,
+            application_type=ApplicationType.SELF,
+            loan_type=LoanType.PERSONAL_LOAN,
+            full_name="ALREADY DISBURSED",
+            email="disbursed@example.com",
+            contact_number="9876543221",
+            city="Delhi",
+            loan_amount=Decimal("500000.00"),
+            monthly_income=Decimal("80000.00"),
+            credit_score=780,
+            status=LeadStatus.DISBURSED,
+            disbursed_at=datetime.now(UTC),
+        )
+        admin = User(
+            id=uuid4(),
+            name="Admin Staff",
+            email="admin@example.com",
+            phone_number="9876500001",
+            reference_id="CNX-REF-ADM",
+            role=UserRoleEnum.ADMIN,
+        )
+
+        service = LeadService(
+            session=_FakeSession(),
+            lead_repository=_FakeLeadRepository([lead]),
+            lead_status_history_repository=_FakeHistoryRepository(),
+        )
+
+        with self.assertRaises(ConflictError):
+            run_coroutine(
+                service.update_lead_status(
+                    lead=lead,
+                    new_status=LeadStatus.DOCUMENTS,
+                    changed_by_user=admin,
+                )
+            )
+
+    def test_terminal_state_rejected_lead_cannot_be_updated(self):
+        lead = Lead(
+            id=uuid4(),
+            lead_id="CNX-20261118-REJ001",
+            created_by_user_id=uuid4(),
+            referred_by_user_id=None,
+            application_type=ApplicationType.SELF,
+            loan_type=LoanType.PERSONAL_LOAN,
+            full_name="REJECTED USER",
+            email="rejected@example.com",
+            contact_number="9876543222",
+            city="Bengaluru",
+            loan_amount=Decimal("300000.00"),
+            monthly_income=Decimal("30000.00"),
+            credit_score=550,
+            status=LeadStatus.REJECTED,
+        )
+        admin = User(
+            id=uuid4(),
+            name="Admin Staff",
+            email="admin@example.com",
+            phone_number="9876500001",
+            reference_id="CNX-REF-ADM",
+            role=UserRoleEnum.ADMIN,
+        )
+
+        service = LeadService(
+            session=_FakeSession(),
+            lead_repository=_FakeLeadRepository([lead]),
+            lead_status_history_repository=_FakeHistoryRepository(),
+        )
+
+        with self.assertRaises(ConflictError):
+            run_coroutine(
+                service.update_lead_status(
+                    lead=lead,
+                    new_status=LeadStatus.CUSTOMER_EVALUATION,
+                    changed_by_user=admin,
+                )
             )
 
 

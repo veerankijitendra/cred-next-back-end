@@ -1,4 +1,5 @@
 import logging
+import math
 from datetime import UTC, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from uuid import UUID, uuid4
@@ -22,6 +23,13 @@ from app.models.lead import Lead
 from app.models.user import User
 from app.repositories.bonus_withdrawal import BonusWithdrawalRepository
 from app.repositories.lead import LeadRepository
+from app.schemas.admin_lead import LeadUserInfo
+from app.schemas.admin_withdrawal import (
+    AdminProcessWithdrawalRequest,
+    AdminWithdrawalItemResponse,
+    AdminWithdrawalListResponse,
+    AdminWithdrawalStats,
+)
 from app.schemas.bonus import (
     BonusBreakdownResponse,
     DisbursedLeadBonusItem,
@@ -80,7 +88,7 @@ class BonusService:
 
         is_eligible = (
             is_cooling_passed
-            and (withdrawal is None)
+            and (withdrawal is None or withdrawal.status == WithdrawalStatus.REJECTED)
             and (lead.status == LeadStatus.DISBURSED)
         )
 
@@ -148,9 +156,9 @@ class BonusService:
         if lead.status != LeadStatus.DISBURSED:
             raise ConflictError("Lead is not yet disbursed.")
 
-        # Double-withdrawal prevention
+        # Double-withdrawal prevention: allow re-application only if previously rejected
         existing = await self.withdrawal_repository.get_by_lead_id(lead_id=lead.id)
-        if existing:
+        if existing and existing.status != WithdrawalStatus.REJECTED:
             raise ConflictError(
                 f"A withdrawal request for this lead has already been submitted (Status: {existing.status.value})."
             )
@@ -177,28 +185,52 @@ class BonusService:
         )
         net_bonus = gross_bonus - tds_amount
 
-        withdrawal = BonusWithdrawal(
-            id=uuid4(),
-            lead_id=lead.id,
-            user_id=current_user.id,
-            loan_type=lead.loan_type,
-            disbursed_amount=disbursed_amt,
-            commission_rate=commission_rate,
-            gross_bonus=gross_bonus,
-            tds_rate=TDS_RATE,
-            tds_amount=tds_amount,
-            net_bonus=net_bonus,
-            cooling_period_end_date=cooling_end,
-            account_holder_name=payload.account_holder_name,
-            payout_method=payload.payout_method,
-            upi_id=payload.upi_id,
-            account_number=payload.account_number,
-            ifsc_code=payload.ifsc_code,
-            status=WithdrawalStatus.PENDING,
-        )
+        if existing and existing.status == WithdrawalStatus.REJECTED:
+            withdrawal = existing
+            withdrawal.loan_type = lead.loan_type
+            withdrawal.disbursed_amount = disbursed_amt
+            withdrawal.commission_rate = commission_rate
+            withdrawal.gross_bonus = gross_bonus
+            withdrawal.tds_rate = TDS_RATE
+            withdrawal.tds_amount = tds_amount
+            withdrawal.net_bonus = net_bonus
+            withdrawal.cooling_period_end_date = cooling_end
+            withdrawal.account_holder_name = payload.account_holder_name
+            withdrawal.payout_method = payload.payout_method
+            withdrawal.upi_id = payload.upi_id
+            withdrawal.account_number = payload.account_number
+            withdrawal.ifsc_code = payload.ifsc_code
+            withdrawal.status = WithdrawalStatus.PENDING
+            withdrawal.transaction_reference = None
+            withdrawal.rejection_reason = None
+            withdrawal.processed_by_admin_id = None
+            withdrawal.processed_at = None
+            withdrawal.notes = None
+            withdrawal.updated_at = now
+        else:
+            withdrawal = BonusWithdrawal(
+                id=uuid4(),
+                lead_id=lead.id,
+                user_id=current_user.id,
+                loan_type=lead.loan_type,
+                disbursed_amount=disbursed_amt,
+                commission_rate=commission_rate,
+                gross_bonus=gross_bonus,
+                tds_rate=TDS_RATE,
+                tds_amount=tds_amount,
+                net_bonus=net_bonus,
+                cooling_period_end_date=cooling_end,
+                account_holder_name=payload.account_holder_name,
+                payout_method=payload.payout_method,
+                upi_id=payload.upi_id,
+                account_number=payload.account_number,
+                ifsc_code=payload.ifsc_code,
+                status=WithdrawalStatus.PENDING,
+            )
 
         try:
-            await self.withdrawal_repository.create(withdrawal=withdrawal)
+            if not existing or existing.status != WithdrawalStatus.REJECTED:
+                await self.withdrawal_repository.create(withdrawal=withdrawal)
             await self.session.commit()
             await self.session.refresh(withdrawal)
 
@@ -234,6 +266,8 @@ class BonusService:
                 cooling_period_end_date=withdrawal.cooling_period_end_date,
                 created_at=withdrawal.created_at,
                 transaction_reference=withdrawal.transaction_reference,
+                rejection_reason=withdrawal.rejection_reason,
+                processed_at=withdrawal.processed_at,
             )
         except Exception:
             await self.session.rollback()
@@ -346,7 +380,167 @@ class BonusService:
                 cooling_period_end_date=w.cooling_period_end_date,
                 created_at=w.created_at,
                 transaction_reference=w.transaction_reference,
+                rejection_reason=w.rejection_reason,
+                processed_at=w.processed_at,
             )
             for w in withdrawals
         ]
         return items, total
+
+    @staticmethod
+    def _to_admin_item_response(
+        withdrawal: BonusWithdrawal,
+    ) -> AdminWithdrawalItemResponse:
+        lead = withdrawal.lead
+        user = withdrawal.user
+        processed_by = withdrawal.processed_by
+
+        lead_code = lead.lead_id if lead else str(withdrawal.lead_id)
+        borrower_name = lead.full_name if lead else "Unknown"
+
+        user_info = LeadUserInfo(
+            id=user.id if user else withdrawal.user_id,
+            name=user.name if user else "Unknown",
+            email=user.email if user else "",
+            phone_number=user.phone_number if user else "",
+            reference_id=user.reference_id if user else "",
+        )
+
+        now = datetime.now(UTC)
+        is_cooling_passed = now >= withdrawal.cooling_period_end_date
+
+        return AdminWithdrawalItemResponse(
+            id=withdrawal.id,
+            lead_id=lead_code,
+            borrower_name=borrower_name,
+            loan_type=withdrawal.loan_type,
+            disbursed_amount=withdrawal.disbursed_amount,
+            commission_rate=withdrawal.commission_rate,
+            gross_bonus=withdrawal.gross_bonus,
+            tds_rate=withdrawal.tds_rate,
+            tds_amount=withdrawal.tds_amount,
+            net_bonus=withdrawal.net_bonus,
+            status=withdrawal.status,
+            payout_method=withdrawal.payout_method,
+            upi_id=withdrawal.upi_id,
+            account_number=withdrawal.account_number,
+            ifsc_code=withdrawal.ifsc_code,
+            account_holder_name=withdrawal.account_holder_name,
+            cooling_period_end_date=withdrawal.cooling_period_end_date,
+            is_cooling_period_passed=is_cooling_passed,
+            created_at=withdrawal.created_at,
+            user=user_info,
+            transaction_reference=withdrawal.transaction_reference,
+            rejection_reason=withdrawal.rejection_reason,
+            notes=withdrawal.notes,
+            processed_at=withdrawal.processed_at,
+            processed_by_admin_id=withdrawal.processed_by_admin_id,
+            processed_by_name=processed_by.name if processed_by else None,
+        )
+
+    async def get_admin_withdrawals(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+        status: WithdrawalStatus | None = None,
+        search: str | None = None,
+    ) -> AdminWithdrawalListResponse:
+        withdrawals, total = (
+            await self.withdrawal_repository.get_admin_withdrawals_paginated(
+                page=page, page_size=page_size, status=status, search=search
+            )
+        )
+        stats_dict = await self.withdrawal_repository.get_admin_withdrawal_stats()
+        stats = AdminWithdrawalStats(**stats_dict)
+
+        items = [self._to_admin_item_response(w) for w in withdrawals]
+        total_pages = math.ceil(total / page_size) if total > 0 else 0
+
+        return AdminWithdrawalListResponse(
+            items=items,
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=total_pages,
+            has_next=page < total_pages,
+            has_previous=page > 1,
+            stats=stats,
+        )
+
+    async def get_admin_withdrawal_stats(self) -> AdminWithdrawalStats:
+        stats_dict = await self.withdrawal_repository.get_admin_withdrawal_stats()
+        return AdminWithdrawalStats(**stats_dict)
+
+    async def get_admin_withdrawal_by_id(
+        self, *, withdrawal_id: UUID
+    ) -> AdminWithdrawalItemResponse:
+        withdrawal = await self.withdrawal_repository.get_by_id_with_relations(
+            withdrawal_id=withdrawal_id
+        )
+        if not withdrawal:
+            raise NotFoundError("Withdrawal request was not found.")
+        return self._to_admin_item_response(withdrawal)
+
+    async def admin_process_withdrawal(
+        self,
+        *,
+        withdrawal_id: UUID,
+        payload: AdminProcessWithdrawalRequest,
+        admin_user: User,
+    ) -> AdminWithdrawalItemResponse:
+        withdrawal = await self.withdrawal_repository.get_by_id_with_relations(
+            withdrawal_id=withdrawal_id
+        )
+        if not withdrawal:
+            raise NotFoundError("Withdrawal request was not found.")
+
+        if withdrawal.status in {WithdrawalStatus.PROCESSED, WithdrawalStatus.REJECTED}:
+            raise ConflictError(
+                f"Withdrawal request has already been finalized ({withdrawal.status.value})."
+            )
+
+        if payload.action == "process":
+            if not payload.transaction_reference or not payload.transaction_reference.strip():
+                raise ConflictError(
+                    "Transaction reference / UPI UTR is required to mark withdrawal as processed."
+                )
+            withdrawal.status = WithdrawalStatus.PROCESSED
+            withdrawal.transaction_reference = payload.transaction_reference.strip()
+            withdrawal.rejection_reason = None
+        elif payload.action == "reject":
+            if not payload.rejection_reason or not payload.rejection_reason.strip():
+                raise ConflictError(
+                    "Rejection reason is required to reject a withdrawal request."
+                )
+            withdrawal.status = WithdrawalStatus.REJECTED
+            withdrawal.rejection_reason = payload.rejection_reason.strip()
+
+        withdrawal.processed_by_admin_id = admin_user.id
+        withdrawal.processed_at = datetime.now(UTC)
+        if payload.notes:
+            withdrawal.notes = payload.notes.strip()
+        withdrawal.updated_at = datetime.now(UTC)
+
+        try:
+            await self.session.commit()
+            await self.session.refresh(withdrawal)
+
+            logger.info(
+                "Withdrawal processed by admin",
+                extra={
+                    "event": "admin.withdrawal_processed",
+                    "withdrawal_id": str(withdrawal.id),
+                    "admin_id": str(admin_user.id),
+                    "action": payload.action,
+                    "status": withdrawal.status.value,
+                },
+            )
+        except Exception:
+            await self.session.rollback()
+            raise
+
+        refreshed = await self.withdrawal_repository.get_by_id_with_relations(
+            withdrawal_id=withdrawal.id
+        )
+        return self._to_admin_item_response(refreshed or withdrawal)

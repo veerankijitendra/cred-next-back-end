@@ -36,6 +36,10 @@ class BonusWithdrawal(Base, BaseModelMixin):
         ifsc_code: str | None = None,
         status: WithdrawalStatus = WithdrawalStatus.PENDING,
         transaction_reference: str | None = None,
+        rejection_reason: str | None = None,
+        processed_by_admin_id: UUID | None = None,
+        processed_at: datetime | None = None,
+        notes: str | None = None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
     ):
@@ -57,6 +61,10 @@ class BonusWithdrawal(Base, BaseModelMixin):
         self.ifsc_code = ifsc_code
         self.status = status
         self.transaction_reference = transaction_reference
+        self.rejection_reason = rejection_reason
+        self.processed_by_admin_id = processed_by_admin_id
+        self.processed_at = processed_at
+        self.notes = notes
         self.created_at = created_at or datetime.now(UTC)
         self.updated_at = updated_at or datetime.now(UTC)
 
@@ -147,5 +155,31 @@ class BonusWithdrawal(Base, BaseModelMixin):
         default=None,
     )
 
+    rejection_reason: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        default=None,
+    )
+
+    processed_by_admin_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+        index=True,
+    )
+
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+
+    notes: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        default=None,
+    )
+
     lead: Mapped[Lead] = relationship("Lead", foreign_keys=[lead_id])
     user: Mapped[User] = relationship("User", foreign_keys=[user_id])
+    processed_by: Mapped[User | None] = relationship("User", foreign_keys=[processed_by_admin_id])

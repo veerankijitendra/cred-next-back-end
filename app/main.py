@@ -27,7 +27,7 @@ from app.core.logging_config import request_id_context, setup_logging
 from app.core.rate_limit import enforce_auth_rate_limit
 
 setup_logging()
-app = FastAPI(title="CredNext API", version="1.0.0.0")
+app = FastAPI(title="CredHexa API", version="1.0.0.0")
 
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(SQLAlchemyError, sqlalchemy_exception_handler)

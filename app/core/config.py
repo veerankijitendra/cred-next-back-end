@@ -4,6 +4,8 @@ from urllib.parse import urlsplit
 from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.constants import OTPChannel
+
 
 class Settings(BaseSettings):
     app_name: str = "CredNexa"
@@ -39,6 +41,11 @@ class Settings(BaseSettings):
     otp_length: int = 6
 
     password_reset_token_expire_minutes: int = 10
+
+    # Resend Email Configuration
+    resend_api_key: SecretStr | None = None
+    resend_from_email: str = "CRED NEXT <onboarding@resend.dev>"
+    default_otp_channel: OTPChannel = OTPChannel.EMAIL
 
     @field_validator("jwt_secret_key")
     @classmethod

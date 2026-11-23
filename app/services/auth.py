@@ -68,10 +68,12 @@ class AuthService:
 
             phone_changed = existing_email.phone_number != data.phone_number
 
-            # Enforce cooldown on the same phone number to avoid OTP spamming
-            if not phone_changed:
+            channel = settings.default_otp_channel
+            # Enforce cooldown on the same destination to avoid OTP spamming
+            cooldown_check_needed = (channel == OTPChannel.PHONE and not phone_changed) or (channel == OTPChannel.EMAIL)
+            if cooldown_check_needed:
                 latest_otp = await otp_service.repository.get_latest(
-                    user_id=existing_email.id, channel=OTPChannel.PHONE, for_update=True
+                    user_id=existing_email.id, channel=channel, for_update=True
                 )
                 if latest_otp:
                     now = datetime.now(UTC)
@@ -131,19 +133,21 @@ class AuthService:
 
         await self.session.refresh(user)
 
-        otp = await otp_service.create_otp(user_id=user.id, channel=OTPChannel.PHONE)
+        channel = settings.default_otp_channel
+        otp = await otp_service.create_otp(user_id=user.id, channel=channel)
 
         await self.session.commit()
 
+        destination = user.email if channel == OTPChannel.EMAIL else user.phone_number
         await notification_service.send_otp(
-            channel=OTPChannel.PHONE, destination=user.phone_number, otp=otp
+            channel=channel, destination=destination, otp=otp
         )
 
         return RegisterResponse(
             user_id=user.id,
             reference_id=user.reference_id,
             verification_required=True,
-            verification_channel=OTPChannel.PHONE,
+            verification_channel=channel,
         )
 
     async def login_user(self, *, email: str, password: str) -> tuple[str, str]:
@@ -182,7 +186,7 @@ class AuthService:
             raise AccountUnverifiedError(
                 message="Please verify your account before logging in.",
                 user_id=str(user.id),
-                channel=OTPChannel.PHONE.value,
+                channel=settings.default_otp_channel.value,
             )
 
         if not user.is_active:

@@ -2,6 +2,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from app.core.config import settings
 from app.core.constants import OTPChannel
 from app.core.exceptions import (
     AccountUnverifiedError,
@@ -139,7 +140,7 @@ class UnverifiedRegistrationTests(unittest.TestCase):
 
         response = run_coroutine(service.register_user(data=reg_request))
         self.assertTrue(response.verification_required)
-        self.assertEqual(response.verification_channel, OTPChannel.PHONE)
+        self.assertEqual(response.verification_channel, settings.default_otp_channel)
 
         created_user = run_coroutine(user_repo.get_by_email(email="vikram@example.com"))
         self.assertIsNotNone(created_user)
@@ -147,6 +148,8 @@ class UnverifiedRegistrationTests(unittest.TestCase):
         self.assertEqual(created_user.name, "Vikram Seth")
         self.assertTrue(verify_password(password="SecurePassword123!", password_hash=created_user.password_hash))
         self.assertEqual(len(notif_service.sent_otps), 1)
+        expected_dest = "vikram@example.com" if settings.default_otp_channel == OTPChannel.EMAIL else "9876543210"
+        self.assertEqual(notif_service.sent_otps[0]["destination"], expected_dest)
 
     def test_verified_user_registration_conflict(self):
         verified_user = User(
@@ -225,7 +228,8 @@ class UnverifiedRegistrationTests(unittest.TestCase):
         self.assertTrue(verify_password(password="BrandNewPassword123!", password_hash=updated.password_hash))
         self.assertFalse(updated.is_verified)
         self.assertEqual(len(notif_service.sent_otps), 1)
-        self.assertEqual(notif_service.sent_otps[0]["destination"], "9876511111")
+        expected_dest = "rahul@example.com" if settings.default_otp_channel == OTPChannel.EMAIL else "9876511111"
+        self.assertEqual(notif_service.sent_otps[0]["destination"], expected_dest)
 
     def test_unverified_user_phone_conflict_with_verified_user(self):
         verified_user = User(
@@ -277,7 +281,7 @@ class UnverifiedRegistrationTests(unittest.TestCase):
         )
         recent_otp = OTPVerification(
             user_id=user_id,
-            channel=OTPChannel.PHONE,
+            channel=settings.default_otp_channel,
             otp_hash="recent_hash",
             expires_at=datetime.now(UTC) + timedelta(minutes=5),
         )
@@ -325,7 +329,7 @@ class UnverifiedRegistrationTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.error_code, "ACCOUNT_UNVERIFIED")
         self.assertEqual(ctx.exception.user_id, str(user_id))
-        self.assertEqual(ctx.exception.channel, "phone")
+        self.assertEqual(ctx.exception.channel, settings.default_otp_channel.value)
 
     def test_notification_service_dev_logging(self):
         notif_service = NotificationService()

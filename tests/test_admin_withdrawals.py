@@ -192,8 +192,8 @@ class AdminWithdrawalTests(unittest.TestCase):
             city="Bengaluru",
             status=LeadStatus.DISBURSED,
         )
-        # Disbursed 10 days ago (cooling passed)
-        self.lead.disbursed_at = datetime.now(UTC) - timedelta(days=10)
+        # Disbursed 20 days ago (cooling passed)
+        self.lead.disbursed_at = datetime.now(UTC) - timedelta(days=20)
 
         self.lead_repo = _FakeLeadRepository({self.lead_id: self.lead})
         self.withdrawal_repo = _FakeWithdrawalRepository()

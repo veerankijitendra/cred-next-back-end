@@ -55,11 +55,11 @@ class Lead(Base, BaseModelMixin):
     lead_id: Mapped[str] = mapped_column(String(45), unique=True, nullable=False)
 
     created_by_user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     referred_by_user_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id"), nullable=True, index=True
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
     application_type: Mapped[str] = mapped_column(

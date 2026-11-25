@@ -1,3 +1,4 @@
+from app.models.acquisition_source import AcquisitionSourceModel
 from app.models.bonus_withdrawal import BonusWithdrawal
 from app.models.lead import Lead
 from app.models.lead_status_history import LeadStatusHistory
@@ -6,6 +7,7 @@ from app.models.refresh_session import RefreshCredential, RefreshSession
 from app.models.user import User
 
 __all__ = [
+    "AcquisitionSourceModel",
     "BonusWithdrawal",
     "Lead",
     "LeadStatusHistory",

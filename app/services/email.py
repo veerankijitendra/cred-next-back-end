@@ -27,12 +27,12 @@ class ResendEmailService:
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Your CRED NEXT Verification Code</title>
+  <title>Your CRED HEXA Verification Code</title>
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 40px 16px;">
   <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
     <div style="background: #1e1b4b; padding: 28px 32px; text-align: center;">
-      <h1 style="color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: 1px; margin: 0;">CRED NEXT</h1>
+      <h1 style="color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: 1px; margin: 0;">CRED HEXA</h1>
       <p style="color: #a5b4fc; font-size: 13px; margin: 6px 0 0 0;">Financial Growth & Referral Platform</p>
     </div>
     <div style="padding: 32px 32px 24px 32px; color: #334155;">
@@ -48,7 +48,7 @@ class ResendEmailService:
       </p>
     </div>
     <div style="background: #f8fafc; padding: 16px 32px; border-top: 1px solid #e2e8f0; text-align: center;">
-      <p style="font-size: 12px; color: #94a3b8; margin: 0;">&copy; CRED NEXT. All rights reserved.</p>
+      <p style="font-size: 12px; color: #94a3b8; margin: 0;">&copy; CRED HEXA. All rights reserved.</p>
     </div>
   </div>
 </body>
@@ -56,7 +56,7 @@ class ResendEmailService:
 
     def _render_otp_text(self, *, otp: str) -> str:
         return (
-            f"Your CRED NEXT verification code is: {otp}\n\n"
+            f"Your CRED HEXA verification code is: {otp}\n\n"
             f"This code will expire in {settings.otp_expire_minutes} minutes.\n"
             f"If you did not request this code, please ignore this message."
         )
@@ -81,7 +81,7 @@ class ResendEmailService:
         params: dict[str, Any] = {
             "from": self.from_email,
             "to": [recipient_email],
-            "subject": f"{otp} is your CRED NEXT verification code",
+            "subject": f"{otp} is your CRED HEXA verification code",
             "html": self._render_otp_html(otp=otp),
             "text": self._render_otp_text(otp=otp),
         }
@@ -90,7 +90,6 @@ class ResendEmailService:
             try:
                 loop = asyncio.get_running_loop()
                 result = await loop.run_in_executor(None, self._sync_send, params)
-                print('jitendra======>after',recipient_email,otp)
 
             except RuntimeError:
                 result = self._sync_send(params)

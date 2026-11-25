@@ -52,3 +52,33 @@ class WithdrawalStatus(StrEnum):
     APPROVED = "approved"
     PROCESSED = "processed"
     REJECTED = "rejected"
+
+
+class AcquisitionSource(StrEnum):
+    BRIGHT_FITNESS = "BrightFitness"
+    V_CARD = "V-Card"
+    P_CARD = "P-Card"
+    SH = "SH"
+    BROWSER = "Browser"
+
+
+VALID_ACQUISITION_SOURCES: dict[str, str] = {
+    "brightfitness": AcquisitionSource.BRIGHT_FITNESS.value,
+    "bright_fitness": AcquisitionSource.BRIGHT_FITNESS.value,
+    "bright fitness": AcquisitionSource.BRIGHT_FITNESS.value,
+    "v-card": AcquisitionSource.V_CARD.value,
+    "vcard": AcquisitionSource.V_CARD.value,
+    "v_card": AcquisitionSource.V_CARD.value,
+    "p-card": AcquisitionSource.P_CARD.value,
+    "pcard": AcquisitionSource.P_CARD.value,
+    "p_card": AcquisitionSource.P_CARD.value,
+    "sh": AcquisitionSource.SH.value,
+    "browser": AcquisitionSource.BROWSER.value,
+}
+
+
+def normalize_acquisition_source(source: str | None) -> str:
+    if not source or not str(source).strip():
+        return AcquisitionSource.BROWSER.value
+    clean = str(source).strip().lower()
+    return VALID_ACQUISITION_SOURCES.get(clean, AcquisitionSource.BROWSER.value)

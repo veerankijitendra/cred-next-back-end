@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.core.constants import ApplicationType, LeadStatus, LoanType
+from app.core.constants import AcquisitionSource, ApplicationType, LeadStatus, LoanType
 from app.schemas.bonus import BonusBreakdownResponse
 
 
@@ -14,6 +14,7 @@ class AdminLeadListQuery(BaseModel):
     search: str | None = Field(default=None, max_length=100)
     status: LeadStatus | None = None
     loan_type: LoanType | None = None
+    source: str | None = None
     start_date: date | None = None
     end_date: date | None = None
 
@@ -48,6 +49,7 @@ class AdminLeadItemResponse(BaseModel):
     loan_amount: Decimal
     monthly_income: Decimal
     credit_score: int | None
+    source: str = "Browser"
     status: LeadStatus
     created_by: LeadUserInfo
     referred_by: LeadUserInfo | None = None
@@ -64,6 +66,7 @@ class AdminLeadStats(BaseModel):
     underwriting: int = 0
     disbursed: int = 0
     rejected: int = 0
+    source_breakdown: dict[str, int] = Field(default_factory=dict)
 
 
 class AdminUpdateLeadStatusRequest(BaseModel):

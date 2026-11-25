@@ -13,6 +13,7 @@ from app.api.v1 import (
     dashboard,
     health,
     leads,
+    super_admin_sources,
     withdrawals,
 )
 from app.core.exception_handlers import (
@@ -55,7 +56,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
-    expose_headers=["X-Request-ID"],
+    expose_headers=["X-Request-ID", "Content-Disposition"],
     max_age=600,
 )
 
@@ -67,3 +68,5 @@ app.include_router(admin_leads.router, prefix="/api/v1")
 app.include_router(admin_users.router, prefix="/api/v1")
 app.include_router(withdrawals.router, prefix="/api/v1")
 app.include_router(admin_withdrawals.router, prefix="/api/v1")
+app.include_router(super_admin_sources.router, prefix="/api/v1")
+app.include_router(super_admin_sources.admin_sources_router, prefix="/api/v1")

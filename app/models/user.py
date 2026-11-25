@@ -25,6 +25,7 @@ class User(BaseModelMixin, Base):
         is_verified: bool = False,
         is_active: bool = True,
         title: str | None = None,
+        source: str = "Browser",
         updated_by_user_id: UUID | None = None,
         updated_by_name: str | None = None,
     ):
@@ -39,6 +40,7 @@ class User(BaseModelMixin, Base):
         self.is_verified = is_verified
         self.is_active = is_active
         self.title = title
+        self.source = source
         self.updated_by_user_id = updated_by_user_id
         self.updated_by_name = updated_by_name
 
@@ -67,6 +69,12 @@ class User(BaseModelMixin, Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     title: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
+    source: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="Browser",
+        server_default="Browser",
+    )
 
     reference_id: Mapped[str] = mapped_column(String(45), unique=True, nullable=False)
 

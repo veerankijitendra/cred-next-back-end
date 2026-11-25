@@ -2,6 +2,8 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from unittest.mock import patch
+
 from app.core.config import settings
 from app.core.constants import OTPChannel
 from app.core.exceptions import (
@@ -331,6 +333,7 @@ class UnverifiedRegistrationTests(unittest.TestCase):
         self.assertEqual(ctx.exception.user_id, str(user_id))
         self.assertEqual(ctx.exception.channel, settings.default_otp_channel.value)
 
+    @patch.object(settings, "resend_api_key", None)
     def test_notification_service_dev_logging(self):
         notif_service = NotificationService()
         phone_delivered = run_coroutine(

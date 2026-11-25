@@ -8,13 +8,20 @@ from uuid import UUID, uuid4
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import ApplicationType, LeadStatus, LoanType
+from app.core.constants import (
+    AcquisitionSource,
+    ApplicationType,
+    LeadStatus,
+    LoanType,
+    normalize_acquisition_source,
+)
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.core.lead_id import generate_lead_id
 from app.enums.user import UserRoleEnum
 from app.models.lead import Lead
 from app.models.lead_status_history import LeadStatusHistory
 from app.models.user import User
+from app.repositories.acquisition_source import AcquisitionSourceRepository
 from app.repositories.lead import LeadRepository
 from app.repositories.lead_status_history import LeadStatusHistoryRepository
 from app.repositories.user import UserRepository
@@ -53,12 +60,18 @@ class LeadService:
         lead_repository: LeadRepository,
         lead_status_history_repository: LeadStatusHistoryRepository,
         user_repository: UserRepository | None = None,
+        acquisition_source_repository: AcquisitionSourceRepository | None = None,
     ):
         self.session = session
         self.lead_repository = lead_repository
         self.lead_status_history_repository = lead_status_history_repository
         self.user_repository = user_repository or (
             UserRepository(session=session) if session is not None else None
+        )
+        self.acquisition_source_repository = acquisition_source_repository or (
+            AcquisitionSourceRepository(session=session)
+            if session is not None and hasattr(session, "execute")
+            else None
         )
 
     async def create_lead(self, *, lead_request: LeadRequest, user: User):
@@ -96,6 +109,13 @@ class LeadService:
                 referred_by_user_id = user.id
 
         lead_uuid = uuid4()
+        resolved_source = (
+            await self.acquisition_source_repository.resolve_source_name(
+                raw_source=lead_request.source
+            )
+            if self.acquisition_source_repository is not None
+            else normalize_acquisition_source(lead_request.source)
+        )
 
         lead = Lead(
             id=lead_uuid,
@@ -111,6 +131,7 @@ class LeadService:
             loan_amount=lead_request.loan_amount,
             monthly_income=lead_request.monthly_income,
             credit_score=lead_request.credit_score,
+            source=resolved_source,
         )
 
         try:
@@ -341,6 +362,7 @@ class LeadService:
         loan_type: LoanType | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
+        source: str | None = None,
     ) -> AdminLeadListResponse:
         leads, total = await self.lead_repository.get_admin_leads_paginated(
             page=page,
@@ -350,6 +372,7 @@ class LeadService:
             loan_type=loan_type,
             start_date=start_date,
             end_date=end_date,
+            source=source,
         )
 
         total_pages = math.ceil(total / page_size) if total > 0 else 0
@@ -367,6 +390,7 @@ class LeadService:
                 loan_amount=lead.loan_amount,
                 monthly_income=lead.monthly_income,
                 credit_score=lead.credit_score,
+                source=lead.source,
                 status=lead.status,
                 created_by=LeadUserInfo.model_validate(lead.created_by),
                 referred_by=LeadUserInfo.model_validate(lead.referred_by) if lead.referred_by else None,
@@ -435,6 +459,7 @@ class LeadService:
             loan_amount=lead_to_return.loan_amount,
             monthly_income=lead_to_return.monthly_income,
             credit_score=lead_to_return.credit_score,
+            source=lead_to_return.source,
             status=lead_to_return.status,
             created_by=LeadUserInfo.model_validate(lead_to_return.created_by),
             referred_by=LeadUserInfo.model_validate(lead_to_return.referred_by) if lead_to_return.referred_by else None,

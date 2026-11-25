@@ -10,7 +10,11 @@ from pydantic import (
     field_validator,
 )
 
-from app.core.constants import OTPChannel
+from app.core.constants import (
+    AcquisitionSource,
+    OTPChannel,
+    normalize_acquisition_source,
+)
 
 MobileNumber = Annotated[
     str,
@@ -47,6 +51,18 @@ class RegisterRequest(BaseModel):
             max_length=PASSWORD_MAX_LENGTH,
         ),
     ]
+    source: str = Field(
+        default=AcquisitionSource.BROWSER.value,
+        max_length=50,
+        description="Acquisition source: BrightFitness, V-Card, P-Card, SH, Browser",
+    )
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def validate_source(cls, value: str | None) -> str:
+        if not value or not str(value).strip():
+            return AcquisitionSource.BROWSER.value
+        return str(value).strip()[:50]
 
     @field_validator("email")
     @classmethod

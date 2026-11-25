@@ -14,7 +14,13 @@ from pydantic import (
     field_validator,
 )
 
-from app.core.constants import ApplicationType, LeadStatus, LoanType
+from app.core.constants import (
+    AcquisitionSource,
+    ApplicationType,
+    LeadStatus,
+    LoanType,
+    normalize_acquisition_source,
+)
 from app.schemas.bonus import BonusBreakdownResponse
 
 
@@ -33,6 +39,19 @@ class LeadRequest(BaseModel):
         min_length=1,
         max_length=45,
     )
+
+    source: str = Field(
+        default=AcquisitionSource.BROWSER.value,
+        max_length=50,
+        description="Acquisition source: BrightFitness, V-Card, P-Card, SH, Browser",
+    )
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def validate_source(cls, value: str | None) -> str:
+        if not value or not str(value).strip():
+            return AcquisitionSource.BROWSER.value
+        return str(value).strip()[:50]
 
     @classmethod
     @field_validator("full_name")
@@ -147,6 +166,7 @@ class LeadResponse(BaseModel):
     status: LeadStatus
     created_by_user_id: UUID
     referred_by_user_id: UUID | None
+    source: str = AcquisitionSource.BROWSER.value
     disbursed_at: datetime | None = None
     bonus: BonusBreakdownResponse | None = None
     created_at: datetime
@@ -197,6 +217,7 @@ class LeadListItemResponse(BaseModel):
     full_name: str
     city: str
     loan_amount: Decimal
+    source: str = AcquisitionSource.BROWSER.value
     status: LeadStatus
     disbursed_at: datetime | None = None
     bonus: BonusBreakdownResponse | None = None

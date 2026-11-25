@@ -5,7 +5,7 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import OTPChannel
+from app.core.constants import OTPChannel, normalize_acquisition_source
 from app.core.config import settings
 from app.core.exceptions import (
     AccountUnverifiedError,
@@ -25,6 +25,7 @@ from app.core.security import (
 from app.models.user import User
 from app.repositories.refresh_session import RefreshSessionRepository
 from app.models.refresh_session import RefreshCredential, RefreshSession
+from app.repositories.acquisition_source import AcquisitionSourceRepository
 from app.repositories.user import UserRepository
 from app.schemas.auth import RegisterRequest, RegisterResponse
 from app.services.notification import NotificationService
@@ -39,12 +40,18 @@ class AuthService:
         session: AsyncSession,
         otp_service: OTPService | None = None,
         notification_service: NotificationService | None = None,
+        acquisition_source_repository: AcquisitionSourceRepository | None = None,
     ):
         self.session = session
         self.user_repository = UserRepository(session=session)
         self.refresh_repository = RefreshSessionRepository(session=session)
         self.otp_service = otp_service or OTPService(session=session)
         self.notification_service = notification_service or NotificationService()
+        self.acquisition_source_repository = acquisition_source_repository or (
+            AcquisitionSourceRepository(session=session)
+            if session is not None and hasattr(session, "execute")
+            else None
+        )
 
     async def register_user(self, *, data: RegisterRequest) -> RegisterResponse:
         existing_email = await self.user_repository.get_by_email(email=data.email)
@@ -90,6 +97,14 @@ class AuthService:
             existing_email.name = data.name
             existing_email.phone_number = data.phone_number
             existing_email.password_hash = hash_password(password=data.password)
+            if data.source:
+                existing_email.source = (
+                    await self.acquisition_source_repository.resolve_source_name(
+                        raw_source=data.source
+                    )
+                    if self.acquisition_source_repository is not None
+                    else normalize_acquisition_source(data.source)
+                )
 
             user = existing_email
             is_resume = True
@@ -102,6 +117,13 @@ class AuthService:
 
             user_id = uuid4()
             password_hash = hash_password(password=data.password)
+            resolved_source = (
+                await self.acquisition_source_repository.resolve_source_name(
+                    raw_source=data.source
+                )
+                if self.acquisition_source_repository is not None
+                else normalize_acquisition_source(data.source)
+            )
 
             user = User(
                 id=user_id,
@@ -112,6 +134,7 @@ class AuthService:
                 password_hash=password_hash,
                 is_verified=False,
                 is_active=False,
+                source=resolved_source,
             )
             is_resume = False
 

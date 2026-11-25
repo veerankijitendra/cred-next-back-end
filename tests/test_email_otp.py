@@ -108,13 +108,14 @@ class EmailOTPTests(unittest.TestCase):
         text = service._render_otp_text(otp="482915")
 
         self.assertIn("482915", html)
-        self.assertIn("CRED NEXT", html)
+        self.assertIn("CRED HEXA", html)
         self.assertIn("5 minutes", html)
 
         self.assertIn("482915", text)
-        self.assertIn("CRED NEXT", text)
+        self.assertIn("CRED HEXA", text)
         self.assertIn("5 minutes", text)
 
+    @patch.object(settings, "resend_api_key", None)
     def test_send_otp_email_without_api_key_falls_back_to_dev(self):
         service = ResendEmailService(api_key=None)
         delivered = run_coroutine(

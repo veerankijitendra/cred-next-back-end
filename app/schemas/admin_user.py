@@ -48,6 +48,7 @@ class AdminUserItemResponse(BaseModel):
     reference_id: str | None = None
     avatar_initials: str | None = None
     assigned_leads_count: int = 0
+    source: str = "Browser"
 
 
 class AdminUserListResponse(BaseModel):

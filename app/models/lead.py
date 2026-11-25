@@ -32,6 +32,7 @@ class Lead(Base, BaseModelMixin):
         credit_score: int | None = None,
         status: LeadStatus = LeadStatus.LEAD_SUBMITTED,
         disbursed_at: datetime | None = None,
+        source: str = "Browser",
     ):
         self.id = id
         self.lead_id = lead_id
@@ -48,6 +49,7 @@ class Lead(Base, BaseModelMixin):
         self.credit_score = credit_score
         self.status = status
         self.disbursed_at = disbursed_at
+        self.source = source
 
     def __repr__(self):
         return f"<Lead(id={self.id})>"
@@ -98,6 +100,14 @@ class Lead(Base, BaseModelMixin):
 
     disbursed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
+    )
+
+    source: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="Browser",
+        server_default="Browser",
+        index=True,
     )
 
     created_by: Mapped[User] = relationship("User", foreign_keys=[created_by_user_id])

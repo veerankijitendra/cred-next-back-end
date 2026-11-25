@@ -681,12 +681,15 @@ class _FakeLeadRepository:
         loan_type: LoanType | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
+        source: str | None = None,
     ):
         filtered = self.leads
         if status:
             filtered = [l for l in filtered if l.status == status]
         if loan_type:
             filtered = [l for l in filtered if l.loan_type == loan_type]
+        if source:
+            filtered = [l for l in filtered if l.source == source]
         if search:
             s = search.lower()
             filtered = [

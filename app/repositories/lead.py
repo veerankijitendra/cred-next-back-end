@@ -143,6 +143,7 @@ class LeadRepository:
         search: str | None = None,
         status: LeadStatus | None = None,
         loan_type: LoanType | None = None,
+        source: str | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
     ) -> tuple[list[Lead], int]:
@@ -161,6 +162,9 @@ class LeadRepository:
 
         if loan_type:
             filters.append(Lead.loan_type == loan_type)
+
+        if source:
+            filters.append(Lead.source == source)
 
         if search:
             search_term = f"%{search.strip()}%"
@@ -215,6 +219,10 @@ class LeadRepository:
         disbursed = counts.get(LeadStatus.DISBURSED, 0)
         rejected = counts.get(LeadStatus.REJECTED, 0)
 
+        source_statement = select(Lead.source, func.count(Lead.id)).group_by(Lead.source)
+        source_result = await self.session.execute(source_statement)
+        source_breakdown = {row[0]: row[1] for row in source_result.all()}
+
         return {
             "total": total,
             "submitted": submitted,
@@ -222,4 +230,5 @@ class LeadRepository:
             "underwriting": underwriting,
             "disbursed": disbursed,
             "rejected": rejected,
+            "source_breakdown": source_breakdown,
         }
